@@ -32,7 +32,7 @@ Follow these steps to get the project running on your local machine.
 4. **Set Environment Variables for Credentials:** For security, your MapMyRide login details are not stored in the code. You must set them as environment variables.  
 **Note**: For a permanent solution, add these to your system's environment variables or your shell's profile file (.zshrc, .bash_profile, etc.).
 5. **Configure Paths:** The project uses a config.ini file to know where to save your data:
-- Create a copy of config.ini.template and rename it to config.ini.
-- Open config.ini in a text editor.
-- Fill in the required paths for tcx_archive_path, simplified_gps_track_folder, and project_path as described by the comments in the file.
+   - Create a copy of config.ini.template and rename it to config.ini.
+   - Open config.ini in a text editor.
+   - Fill in the required paths for tcx_archive_path, simplified_gps_track_folder, and project_path as described by the comments in the file.
        
