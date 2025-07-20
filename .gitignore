@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / C extensions
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+.venv/
+env/
+.env
+
+# PyCharm specific
+.idea/
+
+# Local config files - good practice to ignore
+config.ini
+
+# Local data and generated files
+*.csv
+*.html
+*.geojson
+download_log.csv
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg

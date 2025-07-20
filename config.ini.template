@@ -1,0 +1,30 @@
+[paths]
+# The folder where your final, renamed TCX files will be stored.
+# Use forward slashes, even on Windows.
+# Example: C:/Users/YourUser/Documents/MyWorkouts/TCX_Archive
+tcx_archive_path =
+
+# The folder where simplified GeoJSON files for the map will be stored.
+# Example: C:/Users/YourUser/Documents/MyWorkouts/GeoJSON
+simplified_gps_track_folder =
+
+# The root folder of your project. This is used for saving the final map.
+# Example: C:/Users/YourUser/PycharmProjects/SelMapExtract
+project_path =
+
+[debugging]
+# The local path to the backup of the downloaded workout list from MapMyRide.
+# This should be inside your project folder.
+local_csv_path = mapmyride_export.csv
+
+[selectors]
+# These are the HTML element IDs used by Selenium to find the login fields.
+# They are unlikely to change but are configurable just in case.
+email_input_id = email
+password_input_id = password
+
+[urls]
+# The URLs used by the client.
+login_url = https://www.mapmyride.com/auth/login
+csv_export_url = https://www.mapmyride.com/workouts/export
+tcx_export_url_template = https://www.mapmyride.com/workout/{workout_id}/export_tcx
