@@ -11,6 +11,7 @@ from client import MapMyRideClient
 from map_generator import MapGenerator
 from repository import WorkoutRepository
 from workout import Workout
+import PySimpleGUI as sg
 
 
 def _read_online_csv_data(client: MapMyRideClient, repo: WorkoutRepository) -> Optional[List[Dict]]:
@@ -182,46 +183,75 @@ def generate_maps(config: configparser.ConfigParser):
     print("\n✅ Map generation complete.")
 
 
-# In main.py
-
 def main():
     """
     Main function to run the desired actions based on the configuration.
+    (Updated for compatibility with PySimpleGUI v4.60.4)
     """
+    # --- 1. Load Config ---
     app_config = configparser.ConfigParser()
     config_path = 'config.ini'
     if not Path(config_path).exists():
-        print(f"FATAL: Configuration file '{config_path}' not found.")
+        # Using popup_error which is compatible with v4
+        sg.popup_error(f"FATAL: Configuration file '{config_path}' not found.")
         return
     app_config.read(config_path)
 
-    # --- CHOOSE WHICH ACTION TO RUN ---
-    # Uncomment the function you wish to execute.
+    # --- 2. Define the GUI Layout ---
+    # CHANGE 1: Use the older 'ChangeLookAndFeel' method instead of 'theme'
+    sg.ChangeLookAndFeel('SystemDefault')
 
-    # --------------------------------------------------------------------------
-    # Action 1: Quick Sync (Fast - Recommended for Daily Use)
-    # Only downloads and processes workouts that are NOT already in your master list.
-    # --------------------------------------------------------------------------
-    sync_workouts(config=app_config, use_local_csv=False, full_check=True)
+    action_buttons = ['-QUICK-', '-FULL-', '-LOCAL-', '-MAPS-']
+    layout = [
+        [sg.Text('MapMyRide Data Sync & Mapping Tool', font=('Helvetica', 16))],
+        [sg.Button('Quick Sync', key='-QUICK-', size=(20, 2))],
+        [sg.Button('Full Sync', key='-FULL-', size=(20, 2))],
+        [sg.Button('Sync from Local CSV', key='-LOCAL-', size=(20, 2))],
+        [sg.Button('Generate Maps', key='-MAPS-', size=(20, 2))],
+        # The Output element in v4 automatically captures stdout, so the explicit
+        # redirect context manager is not needed for this implementation.
+        [sg.Output(size=(80, 20), key='-OUTPUT-')],
+        [sg.Button('Exit', size=(10, 1))]
+    ]
 
-    # --------------------------------------------------------------------------
-    # Action 2: Full Sync (Thorough - Slower)
-    # Verifies every existing workout's fingerprint against its TCX file.
-    # --------------------------------------------------------------------------
-    # sync_workouts(config=app_config, use_local_csv=False, full_check=True)
+    window = sg.Window('MapMyRide Control Panel', layout)
 
-    # --------------------------------------------------------------------------
-    # Action 3: Sync using Local Backup (Offline Mode)
-    # Merges data from the local 'mapmyride_export.csv' without downloading.
-    # --------------------------------------------------------------------------
-    # sync_workouts(config=app_config, use_local_csv=True, full_check=True)
+    def toggle_buttons(disabled: bool):
+        """A helper function to easily disable or enable all action buttons."""
+        for key in action_buttons:
+            window[key].update(disabled=disabled)
 
-    # --------------------------------------------------------------------------
-    # Action 4: Generate Maps
-    # Creates simplified GeoJSON files and the final HTML map.
-    # --------------------------------------------------------------------------
-    # generate_maps(config=app_config)
+    # --- 3. Event Loop ---
+    while True:
+        event, values = window.read()
 
+        if event == sg.WIN_CLOSED or event == 'Exit':
+            break
+
+        if event in action_buttons:
+            toggle_buttons(disabled=True)
+            window.refresh()
+
+            # CHANGE 2: Removed the 'with sg.redirect_stdout_to_swallow(...)' block.
+            # The sg.Output element handles the print redirection by default in this layout.
+            window['-OUTPUT-'].update('')  # Clear previous output
+            try:
+                if event == '-QUICK-':
+                    sync_workouts(config=app_config, use_local_csv=False, full_check=False)
+                elif event == '-FULL-':
+                    sync_workouts(config=app_config, use_local_csv=False, full_check=True)
+                elif event == '-LOCAL-':
+                    sync_workouts(config=app_config, use_local_csv=True, full_check=False)
+                elif event == '-MAPS-':
+                    generate_maps(config=app_config)
+            except Exception as e:
+                print(f"\n--- AN ERROR OCCURRED ---\n")
+                import traceback
+                traceback.print_exc()
+            finally:
+                toggle_buttons(disabled=False)
+
+    window.close()
 
 if __name__ == "__main__":
     main()
