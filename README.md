@@ -44,4 +44,5 @@ This will display a menu with the following options:
 - *Quick Sync*: Downloads only new workouts from MapMyRide that are not already in your database.
 - *Full Sync*: A slower, more thorough check that verifies and updates all existing local data against the online source.
 - *Sync from Local CSV*: Adds any workouts from your local backup CSV that are not already in the main database. This is an offline operation.
-- *Generate Maps*: After syncing, this option processes the local data to create the final `all_routes.html` interactive map.
+- *Generate Maps*: After syncing, this option processes the local data to create the final `all_routes.html` interactive map.  Note that by default, this just includes walks and hikes vs rides / other workouts.  You can adjust this by updating the params to the `simplify_workouts()` function. in `generate_maps()` - e.g. to add rides:
+   `map_gen.simplify_workouts(all_workouts, workout_types={'walk', 'hike', 'ride'}, only_if_missing=True)`

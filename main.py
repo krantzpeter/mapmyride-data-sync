@@ -178,7 +178,7 @@ def generate_maps(config: configparser.ConfigParser):
         return
 
     map_gen = MapGenerator(config)
-    map_gen.simplify_workouts(all_workouts, only_if_missing=True)
+    map_gen.simplify_workouts(all_workouts, workout_types={'walk', 'hike'}, only_if_missing=True)
     map_gen.create_route_map()
     print("\n✅ Map generation complete.")
 

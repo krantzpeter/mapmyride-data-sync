@@ -107,7 +107,7 @@ class MapGenerator:
         # Ensure the destination directory exists
         self.simplified_folder.mkdir(parents=True, exist_ok=True)
 
-    def simplify_workouts(self, workouts: List[Workout], only_if_missing: bool = True):
+    def simplify_workouts(self, workouts: List[Workout], workout_types: set = None, only_if_missing: bool = True):
         """
         Creates simplified GeoJSON files for a list of workouts.
 
@@ -115,6 +115,10 @@ class MapGenerator:
             workouts: A list of Workout objects to process.
             only_if_missing: If True, only creates a GeoJSON file if one
                              does not already exist.
+                             :param workouts:           List of Workout objects
+                             :param workout_types:      set of workout types to simplify or None to simplify all types
+                             :param only_if_missing:    True if workout should only be simplified if a simplified file
+                                                        doesn't already exist
         """
         if only_if_missing:
             print("\n--- Simplifying TCX files (Incremental Mode) ---")
@@ -126,7 +130,7 @@ class MapGenerator:
         error_count = 0
 
         # Filter for workouts that should be on the map
-        walk_hike_workouts = [w for w in workouts if w.activity_type in ('Walk', 'Hike')]
+        walk_hike_workouts = [w for w in workouts if not workout_types or w.activity_type in workout_types]
         print(f"Found {len(walk_hike_workouts)} Walk/Hike workouts to process for simplification.")
 
         for workout in walk_hike_workouts:
