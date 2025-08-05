@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 import lxml.etree as ET
 import os
+import logging
+
+log = logging.getLogger(__name__)
 
 
 # --- Helper functions that are tightly coupled to workout data ---
@@ -62,7 +65,7 @@ def _extract_tcx_file_properties(tcx_filename: str) -> Dict[str, str]:
             if el is not None:
                 prop_dict[attrib] = el.text
     except ET.ParseError as e:
-        print(f"ERROR: Could not parse TCX file '{os.path.basename(tcx_filename)}'. Reason: {e}")
+        log.error(f"Could not parse TCX file '{os.path.basename(tcx_filename)}'. Reason: {e}")
         return {}
     return prop_dict
 

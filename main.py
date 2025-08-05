@@ -5,6 +5,7 @@ import csv
 import shutil
 from pathlib import Path
 from typing import List, Dict, Optional
+import logging
 
 # --- Import our new custom classes ---
 from client import MapMyRideClient
@@ -113,6 +114,7 @@ def _process_and_merge_workouts(
 
 
 # In main.py
+
 
 def sync_workouts(config: configparser.ConfigParser, use_local_csv: bool = False, full_check: bool = True):
     """Orchestrates the entire process of syncing workouts from MapMyRide."""
