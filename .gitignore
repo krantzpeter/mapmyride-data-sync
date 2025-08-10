@@ -19,9 +19,7 @@ config.ini
 *.csv
 *.html
 *.geojson
-download_log.csv
 backup/
-backup/*.py
 
 # Distribution / packaging
 .Python

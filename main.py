@@ -4,6 +4,7 @@ import configparser
 import csv
 import shutil
 from pathlib import Path
+import sys
 from typing import List, Dict, Optional
 import logging
 
@@ -14,25 +15,27 @@ from repository import WorkoutRepository
 from workout import Workout
 import PySimpleGUI as sg
 
+log = logging.getLogger(__name__)
+
 
 def _read_online_csv_data(client: MapMyRideClient, repo: WorkoutRepository) -> Optional[List[Dict]]:
     """Uses the client to download, backup, and read the online workout CSV."""
     downloaded_csv_path = client.download_workout_list_csv()
     if not downloaded_csv_path:
-        print("FATAL: Failed to download the workout CSV. Aborting sync.")
+        log.error("Failed to download the workout CSV. Aborting sync.")
         return None
 
     shutil.copy(downloaded_csv_path, repo.local_csv_path)
-    print(f"Downloaded and backed up online CSV to '{repo.local_csv_path.name}'")
+    log.info(f"Downloaded and backed up online CSV to '{repo.local_csv_path.name}'")
     with open(downloaded_csv_path, 'r', newline='', encoding='utf-8-sig') as f:
         return list(csv.DictReader(f))
 
 
 def _read_local_csv_data(repo: WorkoutRepository) -> Optional[List[Dict]]:
     """Reads the workout data from the local backup CSV."""
-    print(f"\n--- Using local CSV: {repo.local_csv_path.name} ---")
+    log.info(f"--- Using local CSV: {repo.local_csv_path.name} ---")
     if not repo.local_csv_path.exists():
-        print(f"FATAL: Local CSV file not found at '{repo.local_csv_path}'.")
+        log.error(f"Local CSV file not found at '{repo.local_csv_path}'.")
         return None
     with open(repo.local_csv_path, 'r', newline='', encoding='utf-8-sig') as f:
         return list(csv.DictReader(f))
@@ -46,25 +49,25 @@ def _process_and_merge_workouts(
         full_check: bool = True
 ):
     """Processes workouts, merging them into the repository and downloading if a client is provided."""
-    print("\n--- Processing and Merging Workouts ---")
+    log.info("--- Processing and Merging Workouts ---")
     new_workouts_count = 0
     updated_fingerprint_count = 0
 
     for i, row in enumerate(online_workouts_data):
-        print(f"\n--- Processing workout {i + 1}/{len(online_workouts_data)} ---")
+        log.info(f"--- Processing workout {i + 1}/{len(online_workouts_data)} ---")
 
         # Create a temporary workout object just to get the ID for lookup
         temp_workout = Workout(row)
         if not temp_workout.workout_id:
-            print("  - ⚠️ SKIPPING: No workout ID found in link.")
+            log.warning("  - SKIPPING: No workout ID found in link.")
             continue
 
-        print(f"  - Workout ID: {temp_workout.workout_id}")
+        log.info(f"  - Workout ID: {temp_workout.workout_id}")
         existing_workout = repo.get_by_id(temp_workout.workout_id)
 
         if not existing_workout:
             new_workouts_count += 1
-            print(f"  - NEW: Workout ID {temp_workout.workout_id} not found in local database.")
+            log.info(f"  - NEW: Workout ID {temp_workout.workout_id} not found in local database.")
 
             # This is a truly new workout, so we create its object
             new_workout = Workout(row)
@@ -80,7 +83,7 @@ def _process_and_merge_workouts(
             # This workout already exists in our master CSV.
             if full_check:
                 # --- This is the THOROUGH path ---
-                print(f"  - 🧐 VERIFYING: Workout ID {existing_workout.workout_id} exists. Performing full check.")
+                log.info(f"  - VERIFYING: Workout ID {existing_workout.workout_id} exists. Performing full check.")
 
                 # Update with the latest online data
                 existing_workout.update_from_online_data(row)
@@ -94,23 +97,23 @@ def _process_and_merge_workouts(
                     # Self-heal fingerprint using the public properties
                     authoritative_fp = existing_workout.fingerprint
                     if authoritative_fp and existing_workout.stored_fingerprint != authoritative_fp:
-                        print(
+                        log.info(
                             f"  - 🔄 UPDATING FINGERPRINT: Old: {existing_workout.stored_fingerprint}, New: {authoritative_fp}")
                         updated_fingerprint_count += 1
                         # Explicitly update the fingerprint in the object's data
                         existing_workout.update_fingerprint(authoritative_fp)
                     else:
-                        print(f"  - 👍 Fingerprint is up-to-date: {authoritative_fp}")
+                        log.info(f"  - Fingerprint is up-to-date: {authoritative_fp}")
 
                     repo.add_or_update(existing_workout)
             else:
                 # --- This is the QUICK path ---
-                print(f"  - ✅ SKIPPING: Workout ID {existing_workout.workout_id} already exists. Quick sync mode.")
+                log.info(f"  - SKIPPING: Workout ID {existing_workout.workout_id} already exists. Quick sync mode.")
                 pass  # Do nothing for existing workouts in quick mode
 
-    print(f"\n--- Sync Summary ---")
-    print(f"New workouts found: {new_workouts_count}")
-    print(f"Fingerprints updated: {updated_fingerprint_count}")
+    log.info("--- Sync Summary ---")
+    log.info(f"New workouts found: {new_workouts_count}")
+    log.info(f"Fingerprints updated: {updated_fingerprint_count}")
 
 
 # In main.py
@@ -118,7 +121,7 @@ def _process_and_merge_workouts(
 
 def sync_workouts(config: configparser.ConfigParser, use_local_csv: bool = False, full_check: bool = True):
     """Orchestrates the entire process of syncing workouts from MapMyRide."""
-    print("\n--- STARTING WORKOUT SYNCHRONIZATION ---")
+    log.info("--- STARTING WORKOUT SYNCHRONIZATION ---")
 
     repo = WorkoutRepository(config)
     repo.load()
@@ -154,35 +157,35 @@ def sync_workouts(config: configparser.ConfigParser, use_local_csv: bool = False
                     full_check=full_check
                 )
             else:
-                print("No workout data found to process.")
+                log.warning("No workout data found to process.")
 
     except ConnectionError as e:
-        print(e)
+        log.error(e)
         # The __exit__ method of the client will still be called for cleanup.
         return
 
     # Save all changes to the master CSV at the very end.
     repo.save_all()
-    print("\n✅ Synchronization complete.")
+    log.info("✅ Synchronization complete.")
 
 
 def generate_maps(config: configparser.ConfigParser):
     """
     Generates the GeoJSON files and the final HTML map.
     """
-    print("\n--- STARTING MAP GENERATION ---")
+    log.info("--- STARTING MAP GENERATION ---")
     repo = WorkoutRepository(config)
     repo.load()  # Load all workout data from the master CSV
 
     all_workouts = repo.get_all()
     if not all_workouts:
-        print("No workouts found in the repository. Cannot generate maps.")
+        log.warning("No workouts found in the repository. Cannot generate maps.")
         return
 
     map_gen = MapGenerator(config)
     map_gen.simplify_workouts(all_workouts, workout_types={'walk', 'hike'}, only_if_missing=True)
     map_gen.create_route_map()
-    print("\n✅ Map generation complete.")
+    log.info("✅ Map generation complete.")
 
 
 def main():
@@ -190,6 +193,13 @@ def main():
     Main function to run the desired actions based on the configuration.
     (Updated for compatibility with PySimpleGUI v4.60.4)
     """
+    # --- Configure structured logging ---
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        stream=sys.stdout  # Direct logs to stdout so PySimpleGUI's Output element can capture it
+    )
+
     # --- 1. Load Config ---
     app_config = configparser.ConfigParser()
     config_path = 'config.ini'
@@ -247,9 +257,7 @@ def main():
                 elif event == '-MAPS-':
                     generate_maps(config=app_config)
             except Exception as e:
-                print(f"\n--- AN ERROR OCCURRED ---\n")
-                import traceback
-                traceback.print_exc()
+                log.exception("An unhandled exception occurred during operation.")
             finally:
                 toggle_buttons(disabled=False)
 
