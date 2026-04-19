@@ -37,6 +37,13 @@ Follow these steps to get the project running on your local machine.
    - Create a copy of config.ini.template and rename it to config.ini.
    - Open config.ini in a text editor.
    - Fill in the required paths for tcx_archive_path, simplified_gps_track_folder, and project_path as described by the comments in the file.
+
+## GPXSEE & FILENAME LOGIC: 
+MapMyRide is bad and correctly recording filenames from the hike names set in the app.  You can fix this by including the hike name in the 'Notes' field of the workout.  You can also manually rename hike filenames so that the correct name is recorded.  See below for more info.
+- This tool identifies TCX files by the (W[ID]) suffix. 
+- You may manually rename TCX files in Explorer, provided you retain the (W[ID]) suffix.   
+- Note: Manual renames in Explorer do NOT flow through to the 'Simplified' folder. 
+- To update these you can simply delete the corresponding workout file from the Simplified folder. 
        
 ## Usage
 Run the main script from you terminal with the command: `python main.py`

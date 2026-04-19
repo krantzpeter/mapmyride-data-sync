@@ -17,6 +17,14 @@ USAGE:
    - GENERATE MAPS: The "Heavy" update. Runs the simplification logic and builds 
      the interactive 'all_routes.html' dashboard.
 
+## GPXSEE & FILENAME LOGIC:
+MapMyRide is bad and correctly recording filenames from the hike names set in the app.  You can fix this by including the hike name in the 'Notes' field of the workout.  You can also manually rename hike filenames so that the correct name is recorded.  See below for more info.
+    - This tool identifies TCX files by the (W[ID]) suffix.
+    - You may manually rename TCX files in Explorer, provided you retain the (W[ID]) suffix.
+    - Note: Manual renames in Explorer do NOT flow through to the 'Simplified' folder.
+    - To update these you can simply delete the corresponding workout file from the Simplified folder.
+
+
 GPXSEE INTEGRATION:
 The 'Simplified' folder (defined in config.ini) is automatically updated during 
 any sync operation. Point GPXSee to this folder to see your latest tracks 
