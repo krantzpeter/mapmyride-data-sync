@@ -191,22 +191,50 @@ def sync_workouts(config: configparser.ConfigParser, use_local_csv: bool = False
     repo.save_all()
     log.info("✅ Synchronization complete.")
 
+
 def simplify_only(config: configparser.ConfigParser):
     """
     Updates the 'Simplified' folder for GPXSee without generating the HTML map.
+    Provides detailed logging for the GUI and console.
     """
-    log.info("--- UPDATING SIMPLIFIED TRACKS FOR GPXSEE ---")
+    log.info("--- STEP 2: UPDATING SIMPLIFIED TRACKS FOR GPXSEE ---")
     repo = WorkoutRepository(config)
     repo.load()
     all_workouts = repo.get_all()
-    
+
     if not all_workouts:
-        log.warning("No workouts found to simplify.")
+        log.warning("  ! No workouts found in local repository to process.")
         return
 
+    count = len(all_workouts)
+    log.info(f"  > Found {count} total workouts in master list.")
+    log.info("  > Filtering for 'walk' and 'hike' types...")
+
     map_gen = MapGenerator(config)
+    # The MapGenerator internally handles the 'only_if_missing' logic.
+    # We log the start of the heavy lifting here.
     map_gen.simplify_workouts(all_workouts, workout_types={'walk', 'hike'}, only_if_missing=True)
-    log.info("✅ Simplified folder updated.")
+
+    log.info("✅ Simplified folder update complete.")
+
+
+def generate_maps(config: configparser.ConfigParser):
+    """
+    Full regeneration: Simplifies tracks AND builds the HTML interactive map.
+    """
+    log.info("--- STARTING FULL MAP REGENERATION ---")
+
+    # 1. Update the simplified data first (reuse the detailed logging in simplify_only)
+    simplify_only(config)
+
+    # 2. Generate the visual HTML map
+    log.info("--- STEP 3: GENERATING INTERACTIVE HTML DASHBOARD ---")
+    map_gen = MapGenerator(config)
+
+    log.info("  > Aggregating GeoJSON data and rendering all_routes.html...")
+    map_gen.create_route_map()
+
+    log.info("✅ Full HTML map generation complete.")
 
 def generate_maps(config: configparser.ConfigParser):
     """
