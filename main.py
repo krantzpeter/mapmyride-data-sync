@@ -1,4 +1,27 @@
-# main.py
+"""
+MapMyRide Track Synchronization & Processing Tool
+
+This application provides a GUI to automate the fetching of workout data from MapMyRide,
+downloading TCX files, and converting them into simplified GeoJSON tracks.
+
+USAGE:
+1. Configuration: Ensure 'config.ini' has correct credentials and folder paths.
+2. Execution: Run via terminal: `python C:/Users/krant/PycharmProjects/SelMapExtract/main.py`
+3. GUI Actions:
+   - QUICK SYNC: Standard update. Logs into MMR, downloads ONLY new workouts, 
+     and updates the 'Simplified' folder for GPXSee. (Recommended daily use).
+   - FULL SYNC: Thorough check. Verifies all local records against the website, 
+     updating metadata and fingerprints for existing tracks.
+   - SYNC FROM LOCAL CSV: Offline mode. Processes 'mapmyride_export.csv' if it was 
+     manually downloaded or moved.
+   - GENERATE MAPS: The "Heavy" update. Runs the simplification logic and builds 
+     the interactive 'all_routes.html' dashboard.
+
+GPXSEE INTEGRATION:
+The 'Simplified' folder (defined in config.ini) is automatically updated during 
+any sync operation. Point GPXSee to this folder to see your latest tracks 
+without needing to generate the full HTML map.
+"""
 
 import configparser
 import csv
