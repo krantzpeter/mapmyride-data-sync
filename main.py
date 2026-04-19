@@ -168,24 +168,35 @@ def sync_workouts(config: configparser.ConfigParser, use_local_csv: bool = False
     repo.save_all()
     log.info("✅ Synchronization complete.")
 
-
-def generate_maps(config: configparser.ConfigParser):
+def simplify_only(config: configparser.ConfigParser):
     """
-    Generates the GeoJSON files and the final HTML map.
+    Updates the 'Simplified' folder for GPXSee without generating the HTML map.
     """
-    log.info("--- STARTING MAP GENERATION ---")
+    log.info("--- UPDATING SIMPLIFIED TRACKS FOR GPXSEE ---")
     repo = WorkoutRepository(config)
-    repo.load()  # Load all workout data from the master CSV
-
+    repo.load()
     all_workouts = repo.get_all()
+    
     if not all_workouts:
-        log.warning("No workouts found in the repository. Cannot generate maps.")
+        log.warning("No workouts found to simplify.")
         return
 
     map_gen = MapGenerator(config)
     map_gen.simplify_workouts(all_workouts, workout_types={'walk', 'hike'}, only_if_missing=True)
+    log.info("✅ Simplified folder updated.")
+
+def generate_maps(config: configparser.ConfigParser):
+    """
+    Full regeneration: Simplifies tracks AND builds the HTML interactive map.
+    """
+    log.info("--- STARTING FULL MAP REGENERATION ---")
+    # 1. Update the simplified data first
+    simplify_only(config)
+    
+    # 2. Generate the visual HTML map
+    map_gen = MapGenerator(config)
     map_gen.create_route_map()
-    log.info("✅ Map generation complete.")
+    log.info("✅ Full HTML map generation complete.")
 
 
 def main():
@@ -250,10 +261,13 @@ def main():
             try:
                 if event == '-QUICK-':
                     sync_workouts(config=app_config, use_local_csv=False, full_check=False)
+                    simplify_only(config=app_config)
                 elif event == '-FULL-':
                     sync_workouts(config=app_config, use_local_csv=False, full_check=True)
+                    simplify_only(config=app_config)
                 elif event == '-LOCAL-':
                     sync_workouts(config=app_config, use_local_csv=True, full_check=False)
+                    simplify_only(config=app_config)
                 elif event == '-MAPS-':
                     generate_maps(config=app_config)
             except Exception as e:
