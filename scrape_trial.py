@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 def run_scrape_trial(workout_id):
     """
     Standalone trial to scrape the 'Proper Name' from a workout page.
-    No blocking enabled - focus is on successful data extraction using
-    the user-provided absolute XPath.
+    Metadata Theft Strategy: Grabs the title from <meta property="og:title">
+    to bypass the slow rendering of the map and UI components.
     """
     # 1. Load Configuration
     config = configparser.ConfigParser()
@@ -33,7 +33,7 @@ def run_scrape_trial(workout_id):
 
     config.read(config_path)
 
-    # 2. Get Credentials from Environment (matching your client.py pattern)
+    # 2. Get Credentials from Environment
     username = os.environ.get('MAPMYRIDE_USERNAME')
     password = os.environ.get('MAPMYRIDE_PASSWORD')
 
@@ -47,14 +47,14 @@ def run_scrape_trial(workout_id):
     pass_id = config.get('selectors', 'password_input_id', fallback='password')
     target_url = f"https://www.mapmyride.com/workout/{workout_id}"
 
-    # 4. Configure Chrome Options (Clean Slate)
+    # 4. Configure Chrome Options
     chrome_options = Options()
 
-    # Run in headful mode (visible) so you can solve ReCAPTCHA or observe the load
+    # We keep it visible for this trial so you can see how quickly the
+    # title is found even if the map is still spinning.
     chrome_options.add_argument("--start-maximized")
 
     driver = webdriver.Chrome(options=chrome_options)
-    # Using your project's 120s timeout to account for manual ReCAPTCHA solving
     wait = WebDriverWait(driver, 120)
 
     try:
@@ -62,7 +62,7 @@ def run_scrape_trial(workout_id):
         log.info(f"Navigating to login: {login_url}")
         driver.get(login_url)
 
-        # 5. Perform Login using project-standard patterns
+        # 5. Perform Login
         log.info("Entering credentials...")
         email_el = wait.until(EC.presence_of_element_located((By.ID, email_id)))
         email_el.send_keys(username)
@@ -70,30 +70,39 @@ def run_scrape_trial(workout_id):
         pwd_el = driver.find_element(By.ID, pass_id)
         pwd_el.send_keys(password)
 
-        # Mirroring the login button click logic from your project
         login_button_xpath = "//button[contains(., 'Log In')]"
         login_button = wait.until(EC.element_to_be_clickable((By.XPATH, login_button_xpath)))
         login_button.click()
 
-        # Wait for transition away from login page
         wait.until(EC.url_changes(login_url))
         log.info("Login successful.")
 
-        # 6. Navigate to the specific workout page (NO BLOCKING)
+        # 6. Navigate to the specific workout page
         log.info(f"Navigating to workout page: {target_url}")
         driver.get(target_url)
 
-        # 7. Extract the Title using the provided Absolute XPath
-        log.info("Waiting for Title element (H4 via absolute XPath)...")
-        title_xpath = "/html/body/div[2]/div/div[3]/div/div/div[1]/div[1]/div/div/div[2]/div[1]/div[1]/div/h4"
+        # 7. Metadata Theft Strategy
+        # We don't wait for the H4 to render. We look for the meta tag in the <head>.
+        log.info("Waiting for Metadata (og:title)...")
         workout_name = "NOT_FOUND"
 
         try:
-            # We use visibility_of_element_located to ensure the title text is actually there
-            title_element = wait.until(EC.visibility_of_element_located((By.XPATH, title_xpath)))
-            workout_name = title_element.text.strip()
+            # We wait for the meta tag to be present in the DOM.
+            # Note: We use presence_of_element_located because meta tags are not visible.
+            meta_element = wait.until(EC.presence_of_element_located(
+                (By.XPATH, "//meta[@property='og:title']")
+            ))
+            workout_name = meta_element.get_attribute("content")
+
+            # If the metadata gives a generic MMR title, we fallback to the H4 you found.
+            if not workout_name or "MapMyRide" == workout_name:
+                log.info("Metadata was generic, falling back to H4 XPath...")
+                title_xpath = "/html/body/div[2]/div/div[3]/div/div/div[1]/div[1]/div/div/div[2]/div[1]/div[1]/div/h4"
+                title_element = wait.until(EC.visibility_of_element_located((By.XPATH, title_xpath)))
+                workout_name = title_element.text.strip()
+
         except Exception as e:
-            log.error(f"Could not find title element using XPath: {e}")
+            log.error(f"Metadata theft failed: {e}")
 
         end_time = time.time()
         log.info("--- TRIAL RESULTS ---")
@@ -104,11 +113,10 @@ def run_scrape_trial(workout_id):
     except Exception as e:
         log.error(f"Trial failed: {e}")
     finally:
-        log.info("Trial complete. Browser will close in 10 seconds.")
-        time.sleep(10)
+        log.info("Trial complete. Closing browser.")
         driver.quit()
 
 
 if __name__ == "__main__":
-    # Test workout ID provided
+    # Test workout ID
     run_scrape_trial("8649434867")
