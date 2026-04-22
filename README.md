@@ -1,55 +1,52 @@
 # MapMyRide Data Sync & Mapping Tool
 
-This project is a Python-based tool designed to synchronize workout data from a MapMyRide account, store it locally, and generate interactive maps of the GPS tracks.
+This project is a Python-based tool designed to synchronize workout data from a MapMyRide account, store it locally, and generate interactive maps of the GPS tracks. 
 
 ## Features
 
-- **Automated Web Scraping:** Uses Selenium to log in to MapMyRide and download workout data.
-- **Just-in-Time Login:** The web client only launches a browser and logs in when a download is actually required, making offline operations fast.
-- **Robust Data Management:**
-    - Stores all workout metadata in a master CSV file (`pk_workouts.csv`).
-    - Downloads and archives all TCX track files to a local directory.
-    - Includes a "Full Sync" mode to verify data integrity and a "Quick Sync" mode for adding new workouts rapidly.
-- **Geospatial Processing:**
-    - Parses TCX files to extract GPS coordinates.
-    - Simplifies complex GPS tracks into lightweight GeoJSON files for efficient mapping.
-- **Interactive Map Generation:** Uses Folium to create a single `all_routes.html` file that visualizes all walk/hike routes on an interactive map.
-- **Secure Credential Management:** Uses environment variables to keep login credentials separate from the source code.
+- Automated Web Scraping: Uses Selenium with an optimized "Metadata Theft" strategy to fetch proper workout titles. 
+- Just-in-Time Login: The web client only launches a browser and logs in when a download or scrape is actually required. 
+- Robust Data Management: 
+  - Stores workout metadata in a master CSV file (pk_workouts.csv) without bloating the schema. 
+  - Downloads and archives TCX track files with descriptive, standardized naming. 
+  - Includes a "Full Sync" mode for comprehensive maintenance and a "Quick Sync" for daily updates. 
+- Geospatial Processing: 
+  - Parses TCX files and simplifies complex tracks into lightweight GeoJSON files. 
+- Interactive Map Generation: Uses Folium to create an all_routes.html dashboard visualizing all hikes and walks. 
 
 ## Important Note: CAPTCHA Requirement
 
-Due to MapMyRide's security measures, the initial login will likely be stopped by a CAPTCHA challenge. The script will pause for up to 120 seconds, giving you time to **manually solve the CAPTCHA** in the browser window that Selenium opens. Once you complete it, the script will automatically proceed with the login.
+Due to MapMyRide's security measures, the initial login will likely be stopped by a CAPTCHA challenge. The script will pause for up to 120 seconds, giving you time to manually solve the CAPTCHA in the browser window. Once completed, the script automatically proceeds. 
 
 ## Setup
 
-Follow these steps to get the project running on your local machine.
+1. Clone the repository. 
+2. Virtual Environment: Create and activate a Python 3.11+ environment. 
+3. Install Dependencies: pip install -r requirements.txt (Uses the last FOSS version of PySimpleGUI). 
+4. Environment Variables: Set MAPMYRIDE_USERNAME and MAPMYRIDE_PASSWORD on your system. 
+5. Configure Paths: Rename config.ini.template to config.ini and fill in your local folder paths. 
 
-1. **Clone the repository:**
-2. **Create and Activate a Virtual Environment:**
-   This isolates the project's dependencies from your system's Python.
-3. **Install Dependencies:**
-   Use: `pip install -r requirements.txt`
-   to install all the required libraries from the `requirements.txt` file.
-   Note: This project uses the last FOSS version of PySimpleGUI
-4. **Set Environment Variables for Credentials:** For security, your MapMyRide login details are not stored in the code. You must set them as environment variables.  
-   - *Note*: For a permanent solution, add these to your system's environment variables or your shell's profile file (.zshrc, .bash_profile, etc.).
-5. **Configure Paths:** The project uses a config.ini file to know where to save your data:
-   - Create a copy of config.ini.template and rename it to config.ini.
-   - Open config.ini in a text editor.
-   - Fill in the required paths for tcx_archive_path, simplified_gps_track_folder, and project_path as described by the comments in the file.
+## GPXSEE & FILENAME LOGIC:
 
-## GPXSEE & FILENAME LOGIC: 
-MapMyRide is bad and correctly recording filenames from the hike names set in the app.  You can fix this by including the hike name in the 'Notes' field of the workout.  You can also manually rename hike filenames so that the correct name is recorded.  See below for more info.
-- This tool identifies TCX files by the (W[ID]) suffix. 
-- You may manually rename TCX files in Explorer, provided you retain the (W[ID]) suffix.   
-- Note: Manual renames in Explorer do NOT flow through to the 'Simplified' folder. 
-- To update these you can simply delete the corresponding workout file from the Simplified folder. 
-       
+- Standardized Naming: Files are named as yyyy mm dd <Title> <Distance>km <Activity> (W[ID]).tcx. 
+- Manual Renaming: You may manually rename TCX files in Explorer. As long as you retain the (W[ID]) suffix, the tool will automatically recover the descriptive title from the filename at runtime. 
+- Proper Names: The tool prioritizes the scraped "Proper Name" from the website or the filename over the generic "Notes" field. 
+- Simplified Folder: Manual renames do not flow through to the 'Simplified' folder automatically. Delete the corresponding GeoJSON file to trigger a re-generation with the new name. 
+
 ## Usage
-Run the main script from you terminal with the command: `python main.py`
-This will display a menu with the following options:
-- *Quick Sync*: Downloads only new workouts from MapMyRide that are not already in your database.
-- *Full Sync*: A slower, more thorough check that verifies and updates all existing local data against the online source.
-- *Sync from Local CSV*: Adds any workouts from your local backup CSV that are not already in the main database. This is an offline operation.
-- *Generate Maps*: After syncing, this option processes the local data to create the final `all_routes.html` interactive map.  Note that by default, this just includes walks and hikes vs rides / other workouts.  You can adjust this by updating the params to the `simplify_workouts()` function. in `generate_maps()` - e.g. to add rides:
-   `map_gen.simplify_workouts(all_workouts, workout_types={'walk', 'hike', 'ride'}, only_if_missing=True)`
+
+Run via terminal: python main.py 
+
+### Sync Modes Comparison
+
+| Feature                  | Quick Sync (full_check=False)          | Full Sync (full_check=True)                         |
+|:------------------------ |:-------------------------------------- |:--------------------------------------------------- |
+| New Workouts             | Scrapes names and downloads TCX.       | Scrapes names and downloads TCX.                    |
+| Metadata Updates         | Ignored. Existing CSV data is trusted. | Updated. Refreshes Calories, Pace, and Stats.       |
+| Missing File Recovery    | Ignored.                               | Active. Re-downloads missing TCX files.             |
+| Fingerprint Healing      | Ignored.                               | Active. Re-syncs fingerprints to match GPS data.    |
+| Filename Standardization | Ignored.                               | Active. Renames generic files if name is recovered. |
+| Runtime Name Recovery    | Limited. Recent batch only.            | Total. Refreshes names/paths for full history.      |
+
+- Sync from Local CSV: Offline mode. Processes mapmyride_export.csv if manually downloaded. 
+- Generate Maps: Re-processes simplified tracks and rebuilds the all_routes.html interactive map. By default, this filters for walks and hikes.
