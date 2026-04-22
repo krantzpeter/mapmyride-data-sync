@@ -22,10 +22,6 @@ def _process_and_merge_workouts(online_data: List[Dict],
                                 existing_files_map: Dict[str, Dict],
                                 client: Optional[MapMyRideClient] = None,
                                 full_check: bool = True):
-    """
-    Processes workouts, linking paths and recovering names from disk at runtime.
-    Skips scraping if the file already exists in a standard format.
-    """
     log.info("--- Processing and Merging Workouts ---")
     new_workouts_count = 0
     repaired_names_count = 0
@@ -33,6 +29,11 @@ def _process_and_merge_workouts(online_data: List[Dict],
     for i, row in enumerate(online_data):
         temp_workout = Workout(row)
         if not temp_workout.workout_id:
+            continue
+
+        # SKIP EMPTY WORKOUTS (0 distance and 0 time)
+        if temp_workout.is_empty:
+            log.info(f"  - SKIPPING: Workout ID {temp_workout.workout_id} is empty (0km/0s).")
             continue
 
         existing_workout = repo.get_by_id(temp_workout.workout_id)
@@ -43,7 +44,6 @@ def _process_and_merge_workouts(online_data: List[Dict],
             log.info(f"  - NEW: Workout ID {temp_workout.workout_id} ({temp_workout.activity_type})")
             new_workout = Workout(row)
 
-            # SCRAPE GUARD: Only scrape for new Hikes/Walks
             if client and is_hike_or_walk:
                 name = client.fetch_workout_name(new_workout.workout_id)
                 if name:
@@ -59,30 +59,35 @@ def _process_and_merge_workouts(online_data: List[Dict],
         else:
             if full_check:
                 existing_workout.update_from_online_data(row)
-
-                # Link path and recover metadata from disk
                 file_status = existing_files_map.get(existing_workout.workout_id, {})
+
+                # Check disk status
                 if file_status:
                     existing_workout.tcx_path = file_status.get('path')
                     if file_status.get('title') and not existing_workout.workout_name:
                         existing_workout.temp_proper_name = file_status['title']
 
-                # REFINED SCRAPE GUARD:
-                # 1. Must be Hike/Walk
-                # 2. Must not already have a name in memory
-                # 3. Must NOT already have a standard-format file on disk
                 is_managed = file_status.get('is_standard', False)
+                file_missing = not existing_workout.tcx_path or not existing_workout.tcx_path.exists()
 
+                # 1. Scraping Repair (Hike/Walk only)
                 if is_hike_or_walk and not existing_workout.workout_name and not is_managed and client:
                     name = client.fetch_workout_name(existing_workout.workout_id)
                     if name:
                         existing_workout.temp_proper_name = name
                         repaired_names_count += 1
                         log.info(f"    - 🛠 REPAIRED: Name recovered: {name}")
-
-                        if existing_workout.tcx_path and existing_workout.tcx_path.exists():
-                            existing_workout.tcx_path = repo.save_tcx_file(existing_workout.tcx_path, existing_workout,
+                        if not file_missing:
+                            existing_workout.tcx_path = repo.save_tcx_file(existing_workout.tcx_path,
+                                                                           existing_workout,
                                                                            ignore_if_exists=True)
+
+                # 2. Missing File Repair: Download if record exists but file is gone
+                if file_missing and client:
+                    log.info(f"    - 🛠 RE-DOWNLOADING: File missing for ID {existing_workout.workout_id}")
+                    temp_path = client.download_tcx_file(existing_workout.workout_id)
+                    if temp_path:
+                        existing_workout.tcx_path = repo.save_tcx_file(temp_path, existing_workout)
 
                 repo.add_or_update(existing_workout)
 

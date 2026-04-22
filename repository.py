@@ -11,18 +11,15 @@ from typing import Dict, List, Optional, Set, Any
 
 from workout import Workout
 
-# Initialize logger to match the pattern in main.py and workout.py
 log = logging.getLogger(__name__)
 
 
 def _extract_metadata_from_filename(path: Path) -> Dict[str, Any]:
     """
-    Parses a descriptive filename to extract ID and Title.
+    Parses a filename to extract ID, Title, and check format compliance.
     Pattern: YYYY MM DD [Title] [Distance]km [Activity] (W[ID]).tcx
     """
     metadata = {'id': None, 'title': None, 'is_standard': False}
-
-    # 1. Extract Workout ID from the (W[ID]) suffix
     id_match = re.search(r'\(W(\d+)\)', path.name)
     if not id_match:
         return metadata
@@ -30,22 +27,22 @@ def _extract_metadata_from_filename(path: Path) -> Dict[str, Any]:
     metadata['id'] = id_match.group(1)
     stem = path.stem
 
-    # 2. Standard Format Check
-    # Matches: Date (YYYY MM DD) followed by any text and ending with the (WID) suffix
+    # 1. Check if the file matches the standard prefix/suffix pattern
     if re.match(r'^\d{4} \d{2} \d{2}.*?\(W\d+\)$', stem):
         metadata['is_standard'] = True
 
-    # 3. Title Extraction
-    # Looks specifically for text between the Date prefix and the Distance metadata
-    title_match = re.search(r'^\d{4} \d{2} \d{2}\s+(.*?)\s+\d+\.\d+km', stem)
+    # 2. Extract Title (text between Date and Distance)
+    # This regex is now more resilient to having zero or more spaces
+    title_match = re.search(r'^\d{4} \d{2} \d{2}\s*(.*?)\s*\d+\.\d+km', stem)
     if title_match:
-        metadata['title'] = title_match.group(1).strip()
+        found_title = title_match.group(1).strip()
+        if found_title:
+            metadata['title'] = found_title
 
     return metadata
 
 
 def _get_unique_filepath(directory: Path, filename: str) -> Path:
-    """Ensures a unique filename by appending a numeric suffix if necessary."""
     filepath = directory / filename
     if not filepath.exists():
         return filepath
@@ -59,10 +56,6 @@ def _get_unique_filepath(directory: Path, filename: str) -> Path:
 
 
 class WorkoutRepository:
-    """
-    Handles persistence and retrieval of workout data and associated files.
-    """
-
     def __init__(self, config: configparser.ConfigParser):
         self.source_folder = Path(config.get('paths', 'source_gps_track_folder'))
         self.master_csv_path = Path(config.get('paths', 'tcx_file_list'))
@@ -71,10 +64,8 @@ class WorkoutRepository:
         self.workouts: Dict[str, Workout] = {}
 
     def load(self):
-        """Loads workout records from the master CSV file."""
         log.info(f"--- Loading Master Workout List from '{self.master_csv_path.name}' ---")
         if not self.master_csv_path.exists():
-            log.warning(f"  - Master CSV not found at {self.master_csv_path}")
             return
         with open(self.master_csv_path, 'r', newline='', encoding='utf-8-sig') as f:
             reader = csv.DictReader(f)
@@ -85,32 +76,24 @@ class WorkoutRepository:
         log.info(f"Loaded {len(self.workouts)} existing workouts from the master list.")
 
     def get_all(self) -> List[Workout]:
-        """Returns all workouts in the repository."""
         return list(self.workouts.values())
 
     def get_by_id(self, workout_id: str) -> Optional[Workout]:
-        """Retrieves a specific workout by its numeric ID."""
         return self.workouts.get(workout_id)
 
     def add_or_update(self, workout: Workout):
-        """Adds a new workout or updates an existing one in memory."""
         self.workouts[workout.workout_id] = workout
 
     def save_all(self):
-        """Persists all workouts in memory back to the master CSV."""
         log.info(f"--- Saving all {len(self.workouts)} workouts to '{self.master_csv_path.name}' ---")
         if not self.workouts:
-            log.warning("  - No workouts to save.")
             return
-
         sorted_workouts = sorted(self.get_all(), key=lambda w: w.workout_date or datetime.min, reverse=True)
         all_rows = [w.to_csv_row() for w in sorted_workouts]
-
         all_keys: Set[str] = set()
         for row in all_rows:
             all_keys.update(row.keys())
 
-        # Define column order to keep the CSV readable and consistent
         preferred_order = ['Date Submitted', 'Workout Date', 'Activity Type', 'Link', 'Filename', 'Fingerprint',
                            'Notes', 'Distance (km)', 'Workout Time (seconds)']
         fieldnames = sorted(list(all_keys),
@@ -125,7 +108,7 @@ class WorkoutRepository:
     def scan_and_build_id_map(self) -> Dict[str, Dict[str, Any]]:
         """
         Scans for TCX files and cleans up duplicates based on ID.
-        Returns a map of ID -> {path: Path, title: str}
+        Returns a map of ID -> {path: Path, title: str, is_standard: bool}
         """
         log.info(f"--- Scanning folder and recovering titles from '{self.source_folder.name}' ---")
         id_to_files: Dict[str, List[Path]] = {}
@@ -143,37 +126,27 @@ class WorkoutRepository:
                 for file_to_delete in file_list[1:]:
                     try:
                         file_to_delete.unlink()
-                    except OSError as e:
-                        log.error(f"    - Failed to delete duplicate {file_to_delete.name}: {e}")
+                    except OSError:
+                        pass
 
             meta = _extract_metadata_from_filename(file_to_keep)
-            authoritative_map[workout_id] = {'path': file_to_keep, 'title': meta['title']}
-
+            authoritative_map[workout_id] = {
+                'path': file_to_keep,
+                'title': meta['title'],
+                'is_standard': meta['is_standard']
+            }
         return authoritative_map
 
     def save_tcx_file(self, temp_path: Path, workout: Workout, ignore_if_exists: bool = False) -> Optional[Path]:
-        """
-        Moves/Renames a TCX file to the repository using standardized naming.
-
-        Args:
-            temp_path: The current location of the file.
-            workout: The workout object used to generate the new name.
-            ignore_if_exists: If True, returns the path immediately if the file is
-                              already at the destination with the correct name.
-                              Defaults to False to preserve original behavior.
-        """
         new_filename_stem = workout.generate_filename_stem()
         new_filename = f"{new_filename_stem}.tcx"
         target_path = self.source_folder / new_filename
 
-        # OPTIONAL IDEMPOTENCY CHECK:
-        # Only triggers if explicitly requested by the caller (e.g., during repair/rename).
         if ignore_if_exists:
             if temp_path.exists() and temp_path.resolve() == target_path.resolve():
                 log.info(f"  - Filename is already correct: {new_filename}")
                 return target_path
 
-        # Standard behavior: ensure a unique name (appends _0001 if a DIFFERENT file exists)
         final_tcx_path = _get_unique_filepath(self.source_folder, new_filename)
         try:
             shutil.move(temp_path, final_tcx_path)
