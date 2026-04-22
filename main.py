@@ -1,288 +1,290 @@
-"""
-MapMyRide Track Synchronization & Processing Tool
-
-This application provides a GUI to automate the fetching of workout data from MapMyRide,
-downloading TCX files, and converting them into simplified GeoJSON tracks.
-
-USAGE:
-1. Configuration: Ensure 'config.ini' has correct credentials and folder paths.
-2. Execution: Run via terminal: `python C:/Users/krant/PycharmProjects/SelMapExtract/main.py`
-3. GUI Actions:
-   - QUICK SYNC: Standard update. Logs into MMR, downloads ONLY new workouts, 
-     and updates the 'Simplified' folder for GPXSee. (Recommended daily use).
-   - FULL SYNC: Thorough check. Verifies all local records against the website, 
-     updating metadata and fingerprints for existing tracks.
-   - SYNC FROM LOCAL CSV: Offline mode. Processes 'mapmyride_export.csv' if it was 
-     manually downloaded or moved.
-   - GENERATE MAPS: The "Heavy" update. Runs the simplification logic and builds 
-     the interactive 'all_routes.html' dashboard.
-
-## GPXSEE & FILENAME LOGIC:
-MapMyRide is bad and correctly recording filenames from the hike names set in the app.  You can fix this by including the hike name in the 'Notes' field of the workout.  You can also manually rename hike filenames so that the correct name is recorded.  See below for more info.
-    - This tool identifies TCX files by the (W[ID]) suffix.
-    - You may manually rename TCX files in Explorer, provided you retain the (W[ID]) suffix.
-    - Note: Manual renames in Explorer do NOT flow through to the 'Simplified' folder.
-    - To update these you can simply delete the corresponding workout file from the Simplified folder.
-
-
-GPXSEE INTEGRATION:
-The 'Simplified' folder (defined in config.ini) is automatically updated during 
-any sync operation. Point GPXSee to this folder to see your latest tracks 
-without needing to generate the full HTML map.
-"""
+# C:/Users/krant/PycharmProjects/SelMapExtract/main.py
 
 import configparser
 import csv
 import shutil
-from pathlib import Path
-import sys
-from typing import List, Dict, Optional
 import logging
+from pathlib import Path
+from typing import List, Dict, Optional
+import PySimpleGUI as sg
+import sys
 
-# --- Import our new custom classes ---
 from client import MapMyRideClient
-from map_generator import MapGenerator
 from repository import WorkoutRepository
 from workout import Workout
-import PySimpleGUI as sg
+from map_generator import MapGenerator
 
 log = logging.getLogger(__name__)
 
 
-def _read_online_csv_data(client: MapMyRideClient, repo: WorkoutRepository) -> Optional[List[Dict]]:
-    """Uses the client to download, backup, and read the online workout CSV."""
-    downloaded_csv_path = client.download_workout_list_csv()
-    if not downloaded_csv_path:
-        log.error("Failed to download the workout CSV. Aborting sync.")
-        return None
-
-    shutil.copy(downloaded_csv_path, repo.local_csv_path)
-    log.info(f"Downloaded and backed up online CSV to '{repo.local_csv_path.name}'")
-    with open(downloaded_csv_path, 'r', newline='', encoding='utf-8-sig') as f:
-        return list(csv.DictReader(f))
-
-
-def _read_local_csv_data(repo: WorkoutRepository) -> Optional[List[Dict]]:
-    """Reads the workout data from the local backup CSV."""
-    log.info(f"--- Using local CSV: {repo.local_csv_path.name} ---")
-    if not repo.local_csv_path.exists():
-        log.error(f"Local CSV file not found at '{repo.local_csv_path}'.")
-        return None
-    with open(repo.local_csv_path, 'r', newline='', encoding='utf-8-sig') as f:
-        return list(csv.DictReader(f))
-
-
-def _process_and_merge_workouts(
-        online_workouts_data: List[Dict],
-        repo: WorkoutRepository,
-        existing_files_map: Dict[str, Path],
-        client: Optional[MapMyRideClient] = None,
-        full_check: bool = True
-):
-    """Processes workouts, merging them into the repository and downloading if a client is provided."""
+def _process_and_merge_workouts(online_data: List[Dict],
+                                repo: WorkoutRepository,
+                                existing_files_map: Dict[str, Dict],
+                                client: Optional[MapMyRideClient] = None,
+                                full_check: bool = True):
+    """
+    Processes workouts, linking paths and recovering names from disk at runtime.
+    Automatically scrapes names for new Hikes/Walks.
+    """
     log.info("--- Processing and Merging Workouts ---")
     new_workouts_count = 0
-    updated_fingerprint_count = 0
+    repaired_names_count = 0
 
-    for i, row in enumerate(online_workouts_data):
-        log.info(f"--- Processing workout {i + 1}/{len(online_workouts_data)} ---")
-
-        # Create a temporary workout object just to get the ID for lookup
+    for i, row in enumerate(online_data):
         temp_workout = Workout(row)
         if not temp_workout.workout_id:
-            log.warning("  - SKIPPING: No workout ID found in link.")
             continue
 
-        log.info(f"  - Workout ID: {temp_workout.workout_id}")
         existing_workout = repo.get_by_id(temp_workout.workout_id)
+        is_hike_or_walk = any(t in temp_workout.activity_type.lower() for t in ['hike', 'walk'])
 
         if not existing_workout:
             new_workouts_count += 1
-            log.info(f"  - NEW: Workout ID {temp_workout.workout_id} not found in local database.")
-
-            # This is a truly new workout, so we create its object
+            log.info(f"  - NEW: Workout ID {temp_workout.workout_id} ({temp_workout.activity_type})")
             new_workout = Workout(row)
 
-            # Download the TCX file only if we are in online mode (client is provided)
+            # Scrape Proper Name for new Hikes/Walks before downloading
+            if client and is_hike_or_walk:
+                name = client.fetch_workout_name(new_workout.workout_id)
+                if name:
+                    new_workout.temp_proper_name = name
+                    log.info(f"    - Title recovered: {name}")
+
             if client:
                 temp_path = client.download_tcx_file(new_workout.workout_id)
                 if temp_path:
-                    final_path = repo.save_tcx_file(temp_path, new_workout)
-                    new_workout.tcx_path = final_path
+                    new_workout.tcx_path = repo.save_tcx_file(temp_path, new_workout)
+
             repo.add_or_update(new_workout)
         else:
-            # This workout already exists in our master CSV.
+            # Existing workout logic
             if full_check:
-                # --- This is the THOROUGH path ---
-                log.info(f"  - VERIFYING: Workout ID {existing_workout.workout_id} exists. Performing full check.")
-
-                # Update with the latest online data
                 existing_workout.update_from_online_data(row)
 
-                # Ensure the file path from the repo is set correctly
-                if temp_workout.workout_id in existing_files_map:
-                    existing_workout.tcx_path = existing_files_map[temp_workout.workout_id]
+                # RUNTIME RECOVERY: Link path and inject title from filename
+                if existing_workout.workout_id in existing_files_map:
+                    file_info = existing_files_map[existing_workout.workout_id]
+                    existing_workout.tcx_path = file_info['path']
+                    # Use the filename title if CSV notes are empty
+                    if file_info['title'] and not existing_workout.workout_name:
+                        existing_workout.temp_proper_name = file_info['title']
 
-                    # main.py -> _process_and_merge_workouts() (Updated)
+                # AUTO-REPAIR: Scrape if still missing (Hike/Walk only)
+                if is_hike_or_walk and not existing_workout.workout_name and client:
+                    name = client.fetch_workout_name(existing_workout.workout_id)
+                    if name:
+                        existing_workout.temp_proper_name = name
+                        repaired_names_count += 1
+                        log.info(f"    - 🛠 REPAIRED: Name recovered: {name}")
 
-                    # Self-heal fingerprint using the public properties
-                    authoritative_fp = existing_workout.fingerprint
-                    if authoritative_fp and existing_workout.stored_fingerprint != authoritative_fp:
-                        log.info(
-                            f"  - 🔄 UPDATING FINGERPRINT: Old: {existing_workout.stored_fingerprint}, New: {authoritative_fp}")
-                        updated_fingerprint_count += 1
-                        # Explicitly update the fingerprint in the object's data
-                        existing_workout.update_fingerprint(authoritative_fp)
-                    else:
-                        log.info(f"  - Fingerprint is up-to-date: {authoritative_fp}")
+                        # Trigger rename on disk to reflect the newly found name
+                        if existing_workout.tcx_path and existing_workout.tcx_path.exists():
+                            existing_workout.tcx_path = repo.save_tcx_file(existing_workout.tcx_path, existing_workout, ignore_if_exists=True)
 
-                    repo.add_or_update(existing_workout)
-            else:
-                # --- This is the QUICK path ---
-                log.info(f"  - SKIPPING: Workout ID {existing_workout.workout_id} already exists. Quick sync mode.")
-                pass  # Do nothing for existing workouts in quick mode
+                repo.add_or_update(existing_workout)
 
-    log.info("--- Sync Summary ---")
-    log.info(f"New workouts found: {new_workouts_count}")
-    log.info(f"Fingerprints updated: {updated_fingerprint_count}")
+    log.info(f"--- Sync Summary: {new_workouts_count} New, {repaired_names_count} Repaired ---")
 
 
-# In main.py
+def repair_workout_names(config: configparser.ConfigParser,
+                         client: Optional[MapMyRideClient] = None,
+                         workout_ids: Optional[List[str]] = None,
+                         fix_all_activities: bool = False,
+                         dry_run: bool = False):
+    """
+    Recovers 'Proper Names' for workouts by scraping the MapMyRide website.
 
-
-def sync_workouts(config: configparser.ConfigParser, use_local_csv: bool = False, full_check: bool = True):
-    """Orchestrates the entire process of syncing workouts from MapMyRide."""
-    log.info("--- STARTING WORKOUT SYNCHRONIZATION ---")
-
+    Args:
+        config: App configuration.
+        client: Selenium client.
+        workout_ids: List of IDs to process.
+        fix_all_activities: If True, bypasses the Hike/Walk filter.
+        dry_run: If True, logs intended changes without renaming files or saving CSV.
+    """
     repo = WorkoutRepository(config)
     repo.load()
+
+    # 1. Scan disk to refresh paths and titles (Runtime Recovery)
     existing_files_map = repo.scan_and_build_id_map()
+    for w in repo.get_all():
+        if w.workout_id in existing_files_map:
+            info = existing_files_map[w.workout_id]
+            w.tcx_path = info['path']
+            # If we recovered a title from the filename and Workout Name is empty, use it
+            if info['title'] and not w.workout_name:
+                w.temp_proper_name = info['title']
 
-    # The 'with' block now safely manages the client's lifecycle (especially cleanup).
-    # The browser will NOT launch unless a download method is actually called.
-    try:
-        with MapMyRideClient(config) as client:
-            online_workouts_data: Optional[List[Dict]] = None
+    # 2. Determine which workouts to process
+    if workout_ids:
+        to_repair = [repo.get_by_id(wid) for wid in workout_ids if repo.get_by_id(wid)]
+    else:
+        to_repair = [w for w in repo.get_all() if not w.workout_name and (
+                fix_all_activities or any(t in w.activity_type.lower() for t in ['hike', 'walk']))]
 
-            # This variable will hold the client instance ONLY if we are in online mode.
-            # It will be passed to the processing function for downloading TCX files.
-            client_for_processing: Optional[MapMyRideClient] = None
-
-            if use_local_csv:
-                online_workouts_data = _read_local_csv_data(repo)
-                # In this branch, no client methods are called, so no login occurs.
-            else:  # Online mode
-                # This is the first call to the client, which will trigger the JIT login.
-                online_workouts_data = _read_online_csv_data(client, repo)
-                # If we successfully got data, we set the client to be used for processing.
-                if online_workouts_data:
-                    client_for_processing = client
-
-            # Now, process the data we've loaded, either from local or online.
-            if online_workouts_data:
-                _process_and_merge_workouts(
-                    online_workouts_data,
-                    repo,
-                    existing_files_map,
-                    client=client_for_processing,  # Pass the active client, or None
-                    full_check=full_check
-                )
-            else:
-                log.warning("No workout data found to process.")
-
-    except ConnectionError as e:
-        log.error(e)
-        # The __exit__ method of the client will still be called for cleanup.
+    if not to_repair:
+        log.info("No workouts identified for name repair.")
         return
 
-    # Save all changes to the master CSV at the very end.
-    repo.save_all()
-    log.info("✅ Synchronization complete.")
+    mode_prefix = "[DRY RUN] " if dry_run else ""
+    log.info(f"--- {mode_prefix}Starting Name Repair for {len(to_repair)} workouts ---")
+
+    # 3. Initialize a single client for the entire batch
+    own_client = False
+    if client is None:
+        client = MapMyRideClient(config)
+        own_client = True
+
+    try:
+        for i, workout in enumerate(to_repair):
+            log.info(f"[{i + 1}/{len(to_repair)}] {mode_prefix}Processing {workout.workout_id}...")
+
+            # Scrape is always needed to get the authoritative 'Proper Name' from MMR
+            name = client.fetch_workout_name(workout.workout_id)
+
+            if name:
+                # Update memory for filename generation test
+                # (Workout.workout_name prioritizes temp_proper_name)
+                old_temp_name = workout.temp_proper_name
+                workout.temp_proper_name = name
+
+                if workout.tcx_path and workout.tcx_path.exists():
+                    old_filename = workout.tcx_path.name
+                    new_filename = f"{workout.generate_filename_stem()}.tcx"
+
+                    if old_filename != new_filename:
+                        log.info(f"  - {mode_prefix}ACTION: Would rename '{old_filename}'")
+                        log.info(f"    -> TO: '{new_filename}'")
+                        if not dry_run:
+                            new_path = repo.save_tcx_file(workout.tcx_path, workout, ignore_if_exists=True)
+                            if new_path:
+                                workout.tcx_path = new_path
+                    else:
+                        log.info(f"  - {mode_prefix}NO CHANGE: Filename matches recovered name.")
+
+                # If dry run, revert the memory change to keep the object clean
+                if dry_run:
+                    workout.temp_proper_name = old_temp_name
+            else:
+                log.warning(f"  - {mode_prefix}FAILED: Could not recover name for {workout.workout_id}")
+
+        # 4. Save metadata changes to CSV if not in dry run
+        if not dry_run:
+            repo.save_all()
+            log.info("✅ All changes saved to master list.")
+        else:
+            log.info(f"--- {mode_prefix}Finished. No files or CSV records were modified. ---")
+
+    finally:
+        if own_client:
+            # Shutdown the single browser instance
+            client.__exit__(None, None, None)
+
+
+def sync_workouts(config, use_local_csv=False, full_check=False):
+    """Orchestrates the synchronization process."""
+    repo = WorkoutRepository(config)
+    repo.load()
+
+    # Scan disk to find existing files and recover titles from filenames
+    existing_files_map = repo.scan_and_build_id_map()
+
+    online_data = []
+    client = None
+
+    try:
+        if use_local_csv:
+            log.info("Using local CSV for synchronization.")
+            with open(config.get('debugging', 'local_csv_path'), 'r', encoding='utf-8-sig') as f:
+                online_data = list(csv.DictReader(f))
+        else:
+            client = MapMyRideClient(config)
+            online_data_path = client.download_workout_list_csv()
+            if online_data_path:
+                with open(online_data_path, 'r', encoding='utf-8-sig') as f:
+                    online_data = list(csv.DictReader(f))
+
+        if online_data:
+            _process_and_merge_workouts(online_data, repo, existing_files_map, client, full_check)
+            repo.save_all()
+            log.info("✅ Synchronization complete.")
+    finally:
+        if client:
+            client.__exit__(None, None, None)
 
 
 def simplify_only(config: configparser.ConfigParser):
-    """
-    Updates the 'Simplified' folder for GPXSee without generating the HTML map.
-    Provides detailed logging for the GUI and console.
-    """
+    """Updates the 'Simplified' folder for GPXSee without generating the HTML map."""
     log.info("--- STEP 2: UPDATING SIMPLIFIED TRACKS FOR GPXSEE ---")
     repo = WorkoutRepository(config)
     repo.load()
+
+    # We must scan disk here too to ensure workout_name is recovered for the GeoJSON
+    existing_files_map = repo.scan_and_build_id_map()
     all_workouts = repo.get_all()
 
+    for w in all_workouts:
+        if w.workout_id in existing_files_map:
+            info = existing_files_map[w.workout_id]
+            if info['title'] and not w.workout_name:
+                w.temp_proper_name = info['title']
+
     if not all_workouts:
-        log.warning("  ! No workouts found in local repository to process.")
+        log.warning("  ! No workouts found to process.")
         return
 
-    count = len(all_workouts)
-    log.info(f"  > Found {count} total workouts in master list.")
-    log.info("  > Filtering for 'walk' and 'hike' types...")
-
+    log.info(f"  > Processing {len(all_workouts)} workouts...")
     map_gen = MapGenerator(config)
-    # The MapGenerator internally handles the 'only_if_missing' logic.
-    # We log the start of the heavy lifting here.
     map_gen.simplify_workouts(all_workouts, workout_types={'walk', 'hike'}, only_if_missing=True)
-
     log.info("✅ Simplified folder update complete.")
 
 
 def generate_maps(config: configparser.ConfigParser):
-    """
-    Full regeneration: Simplifies tracks AND builds the HTML interactive map.
-    """
+    """Full regeneration: Simplifies tracks AND builds the HTML interactive map."""
     log.info("--- STARTING FULL MAP REGENERATION ---")
-
-    # 1. Update the simplified data first (reuse the detailed logging in simplify_only)
     simplify_only(config)
 
-    # 2. Generate the visual HTML map
     log.info("--- STEP 3: GENERATING INTERACTIVE HTML DASHBOARD ---")
     map_gen = MapGenerator(config)
-
     log.info("  > Aggregating GeoJSON data and rendering all_routes.html...")
-    map_gen.create_route_map()
-
-    log.info("✅ Full HTML map generation complete.")
-
-def generate_maps(config: configparser.ConfigParser):
-    """
-    Full regeneration: Simplifies tracks AND builds the HTML interactive map.
-    """
-    log.info("--- STARTING FULL MAP REGENERATION ---")
-    # 1. Update the simplified data first
-    simplify_only(config)
-    
-    # 2. Generate the visual HTML map
-    map_gen = MapGenerator(config)
     map_gen.create_route_map()
     log.info("✅ Full HTML map generation complete.")
 
 
 def main():
-    """
-    Main function to run the desired actions based on the configuration.
-    (Updated for compatibility with PySimpleGUI v4.60.4)
-    """
-    # --- Configure structured logging ---
+    """Main function to run the PySimpleGUI event loop."""
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        stream=sys.stdout  # Direct logs to stdout so PySimpleGUI's Output element can capture it
+        stream=sys.stdout
     )
 
-    # --- 1. Load Config ---
     app_config = configparser.ConfigParser()
     config_path = 'config.ini'
     if not Path(config_path).exists():
-        # Using popup_error which is compatible with v4
         sg.popup_error(f"FATAL: Configuration file '{config_path}' not found.")
         return
     app_config.read(config_path)
 
-    # --- 2. Define the GUI Layout ---
-    # CHANGE 1: Use the older 'ChangeLookAndFeel' method instead of 'theme'
-    sg.ChangeLookAndFeel('SystemDefault')
+    # --- ONE-TIME SURGICAL REPAIR HOOK ---
+    # This block processes the specific list of IDs provided.
+    # You can comment this block out or remove it after one successful run.
+    ids_to_fix = [
+        '8782629674', '8778241216', '8774605240', '8755448943',
+        '8754095487', '8737993344', '8727597018', '8725460749',
+        '8724063734', '8723676990', '8721711543', '8720197148',
+        '8691926181', '8679932016', '8675744877', '8675744082',
+        '8666511699', '8664620348', '8658414670', '8653715850',
+        '8649434867', '8645074345', '8635432315', '8631067667'
+    ]
 
+    log.info(f"--- STARTING SURGICAL REPAIR FOR {len(ids_to_fix)} WORKOUTS ---")
+    # fix_all_activities=True ensures that even bike rides in this specific list are fixed.
+    # Set dry_run=True to verify names before applying
+    repair_workout_names(app_config, workout_ids=ids_to_fix, fix_all_activities=True, dry_run=True)
+    log.info("--- SURGICAL REPAIR COMPLETE ---")
+    # -------------------------------------
+
+    sg.ChangeLookAndFeel('SystemDefault')
     action_buttons = ['-QUICK-', '-FULL-', '-LOCAL-', '-MAPS-']
     layout = [
         [sg.Text('MapMyRide Data Sync & Mapping Tool', font=('Helvetica', 16))],
@@ -290,8 +292,6 @@ def main():
         [sg.Button('Full Sync', key='-FULL-', size=(20, 2))],
         [sg.Button('Sync from Local CSV', key='-LOCAL-', size=(20, 2))],
         [sg.Button('Generate Maps', key='-MAPS-', size=(20, 2))],
-        # The Output element in v4 automatically captures stdout, so the explicit
-        # redirect context manager is not needed for this implementation.
         [sg.Output(size=(80, 20), key='-OUTPUT-')],
         [sg.Button('Exit', size=(10, 1))]
     ]
@@ -299,24 +299,19 @@ def main():
     window = sg.Window('MapMyRide Control Panel', layout)
 
     def toggle_buttons(disabled: bool):
-        """A helper function to easily disable or enable all action buttons."""
         for key in action_buttons:
             window[key].update(disabled=disabled)
 
-    # --- 3. Event Loop ---
     while True:
         event, values = window.read()
-
         if event == sg.WIN_CLOSED or event == 'Exit':
             break
 
         if event in action_buttons:
             toggle_buttons(disabled=True)
             window.refresh()
+            window['-OUTPUT-'].update('')
 
-            # CHANGE 2: Removed the 'with sg.redirect_stdout_to_swallow(...)' block.
-            # The sg.Output element handles the print redirection by default in this layout.
-            window['-OUTPUT-'].update('')  # Clear previous output
             try:
                 if event == '-QUICK-':
                     sync_workouts(config=app_config, use_local_csv=False, full_check=False)
@@ -335,6 +330,7 @@ def main():
                 toggle_buttons(disabled=False)
 
     window.close()
+
 
 if __name__ == "__main__":
     main()
