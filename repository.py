@@ -128,34 +128,34 @@ class WorkoutRepository:
         return authoritative_map
 
 
-def save_tcx_file(self, temp_path: Path, workout: Workout, ignore_if_exists: bool = False) -> Optional[Path]:
-    """
-        Moves/Renames a TCX file to the repository using standardized naming.
-
-        Args:
-            temp_path: The current location of the file.
-            workout: The workout object used to generate the new name.
-            ignore_if_exists: If True, returns the path immediately if the file is
-                              already at the destination with the correct name.
-                              Defaults to False to preserve original behavior.
+    def save_tcx_file(self, temp_path: Path, workout: Workout, ignore_if_exists: bool = False) -> Optional[Path]:
         """
-    new_filename_stem = workout.generate_filename_stem()
-    new_filename = f"{new_filename_stem}.tcx"
-    target_path = self.source_folder / new_filename
+            Moves/Renames a TCX file to the repository using standardized naming.
 
-    # OPTIONAL IDEMPOTENCY CHECK:
-    # Only triggers if explicitly requested by the caller (e.g., during repair/rename).
-    if ignore_if_exists:
-        if temp_path.exists() and temp_path.resolve() == target_path.resolve():
-            log.info(f"  - Filename is already correct: {new_filename}")
-            return target_path
+            Args:
+                temp_path: The current location of the file.
+                workout: The workout object used to generate the new name.
+                ignore_if_exists: If True, returns the path immediately if the file is
+                                  already at the destination with the correct name.
+                                  Defaults to False to preserve original behavior.
+            """
+        new_filename_stem = workout.generate_filename_stem()
+        new_filename = f"{new_filename_stem}.tcx"
+        target_path = self.source_folder / new_filename
 
-    # Standard behavior: ensure a unique name (appends _0001 if a DIFFERENT file exists)
-    final_tcx_path = _get_unique_filepath(self.source_folder, new_filename)
-    try:
-        shutil.move(temp_path, final_tcx_path)
-        print(f"  - 💾 SAVED: Renamed and moved to '{final_tcx_path.name}'")
-        return final_tcx_path
-    except (OSError, shutil.Error) as e:
-        print(f"  - ❌ FAILED: Could not move file: {e}")
-        return None
+        # OPTIONAL IDEMPOTENCY CHECK:
+        # Only triggers if explicitly requested by the caller (e.g., during repair/rename).
+        if ignore_if_exists:
+            if temp_path.exists() and temp_path.resolve() == target_path.resolve():
+                log.info(f"  - Filename is already correct: {new_filename}")
+                return target_path
+
+        # Standard behavior: ensure a unique name (appends _0001 if a DIFFERENT file exists)
+        final_tcx_path = _get_unique_filepath(self.source_folder, new_filename)
+        try:
+            shutil.move(temp_path, final_tcx_path)
+            print(f"  - 💾 SAVED: Renamed and moved to '{final_tcx_path.name}'")
+            return final_tcx_path
+        except (OSError, shutil.Error) as e:
+            print(f"  - ❌ FAILED: Could not move file: {e}")
+            return None

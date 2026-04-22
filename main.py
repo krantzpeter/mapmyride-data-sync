@@ -265,24 +265,24 @@ def main():
         return
     app_config.read(config_path)
 
-    # --- ONE-TIME SURGICAL REPAIR HOOK ---
-    # This block processes the specific list of IDs provided.
-    # You can comment this block out or remove it after one successful run.
-    ids_to_fix = [
-        '8782629674', '8778241216', '8774605240', '8755448943',
-        '8754095487', '8737993344', '8727597018', '8725460749',
-        '8724063734', '8723676990', '8721711543', '8720197148',
-        '8691926181', '8679932016', '8675744877', '8675744082',
-        '8666511699', '8664620348', '8658414670', '8653715850',
-        '8649434867', '8645074345', '8635432315', '8631067667'
-    ]
-
-    log.info(f"--- STARTING SURGICAL REPAIR FOR {len(ids_to_fix)} WORKOUTS ---")
-    # fix_all_activities=True ensures that even bike rides in this specific list are fixed.
-    # Set dry_run=True to verify names before applying
-    repair_workout_names(app_config, workout_ids=ids_to_fix, fix_all_activities=True, dry_run=True)
-    log.info("--- SURGICAL REPAIR COMPLETE ---")
-    # -------------------------------------
+    # # --- ONE-TIME SURGICAL REPAIR HOOK ---
+    # # This block processes the specific list of IDs provided.
+    # # You can comment this block out or remove it after one successful run.
+    # ids_to_fix = [
+    #     '8782629674', '8778241216', '8774605240', '8755448943',
+    #     '8754095487', '8737993344', '8727597018', '8725460749',
+    #     '8724063734', '8723676990', '8721711543', '8720197148',
+    #     '8691926181', '8679932016', '8675744877', '8675744082',
+    #     '8666511699', '8664620348', '8658414670', '8653715850',
+    #     '8649434867', '8645074345', '8635432315', '8631067667'
+    # ]
+    #
+    # log.info(f"--- STARTING SURGICAL REPAIR FOR {len(ids_to_fix)} WORKOUTS ---")
+    # # fix_all_activities=True ensures that even bike rides in this specific list are fixed.
+    # # Set dry_run=True to verify names before applying
+    # repair_workout_names(app_config, workout_ids=ids_to_fix, fix_all_activities=True, dry_run=False)
+    # log.info("--- SURGICAL REPAIR COMPLETE ---")
+    # # -------------------------------------
 
     sg.ChangeLookAndFeel('SystemDefault')
     action_buttons = ['-QUICK-', '-FULL-', '-LOCAL-', '-MAPS-']

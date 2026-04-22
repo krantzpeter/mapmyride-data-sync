@@ -11,6 +11,13 @@ import logging
 
 log = logging.getLogger(__name__)
 
+# List of keywords that commonly appear in default MapMyRide titles
+# We strip these to avoid "double-ups" in filenames.
+ACTIVITY_KEYWORDS = [
+    'Road Cycling', 'Bike Ride', 'Cycling', 'Hike', 'Walk',
+    'Running', 'Run', 'Mountain Biking', 'Walk/Hike'
+]
+
 
 def _get_workout_id_from_link(link: str) -> str:
     if not link:
@@ -104,8 +111,9 @@ class Workout:
         """
         if self.temp_proper_name:
             return self.temp_proper_name
-        # Fallback to scraped data if it exists in the raw dictionary,
-        # otherwise return Notes.
+
+        # We also check the raw dictionary for 'Workout Name' in case it was
+        # populated by a previous scrape in the same session.
         return self._data.get('Workout Name', self.notes)
 
     @property
@@ -129,11 +137,12 @@ class Workout:
     def update_from_online_data(self, new_data: Dict[str, Any]):
         self._data.update(new_data)
 
+
     def generate_filename_stem(self) -> str:
         """
-        Generates the standardized base name for the TCX file.
-        Format: yyyy mm dd <title> <distance>km <Activity> (W<workout no>)
-        """
+            Generates the standardized base name for the TCX file.
+            Format: yyyy mm dd <title> <distance>km <Activity> (W<workout no>)
+            """
         date_prefix = self.workout_date.strftime('%Y %m %d') if self.workout_date else "0000 00 00"
         activity_display = self.activity_type.replace('/', '_')
 
@@ -142,13 +151,37 @@ class Workout:
         cleaned_name = raw_name
 
         if cleaned_name:
-            # Strip redundant activity/distance from the end (e.g., from scraped titles)
-            cleaned_name = re.sub(rf'\s*{re.escape(self.activity_type)}\s*$', '', cleaned_name, flags=re.IGNORECASE)
-            cleaned_name = re.sub(rf'\s*{self.distance_km:.2f}\s*km\s*$', '', cleaned_name, flags=re.IGNORECASE)
-            cleaned_name = re.sub(rf'\s*{self.distance_km:g}\s*km\s*$', '', cleaned_name, flags=re.IGNORECASE)
-            cleaned_name = re.sub(r'[<>:"/\\|?*]', '', cleaned_name).strip()
+            # 1. Strip redundant distance patterns anywhere (e.g., "11.62km" or "11.6 km")
+            dist_patterns = [
+                rf'{self.distance_km:.2f}\s*km',
+                rf'{self.distance_km:g}\s*km'
+            ]
+            for dp in dist_patterns:
+                cleaned_name = re.sub(dp, '', cleaned_name, flags=re.IGNORECASE)
 
+            # 2. Strip synonyms and activity keywords anywhere
+            # CRITICAL: We sort by length descending to ensure "Road Cycling"
+            # is stripped before "Cycling", otherwise "Road" gets left behind.
+            all_synonyms = sorted(
+                list(set(ACTIVITY_KEYWORDS + [self.activity_type])),
+                key=len,
+                reverse=True
+            )
+
+            for keyword in all_synonyms:
+                # Use word boundaries (\b) to ensure we don't strip "Walk" out of "Skywalk"
+                cleaned_name = re.sub(rf'\b{re.escape(keyword)}\b', '', cleaned_name, flags=re.IGNORECASE)
+
+            # 3. Strip Windows-illegal characters
+            cleaned_name = re.sub(r'[<>:"/\\|?*]', '', cleaned_name)
+
+            # 4. Final Cleanup: Collapse multiple spaces and strip ends
+            cleaned_name = re.sub(r'\s+', ' ', cleaned_name).strip()
+
+        # If after scrubbing, the title is empty (meaning it was just metadata),
+        # name_part will be empty and we avoid the double spaces.
         name_part = f" {cleaned_name}" if cleaned_name else ""
+
         return f"{date_prefix}{name_part} {self.distance_km:.2f}km {activity_display} (W{self.workout_id})"
 
     def to_csv_row(self) -> Dict[str, Any]:
@@ -156,9 +189,11 @@ class Workout:
         Prepares the row for persistence.
         Explicitly removes the 'Workout Name' column to maintain the desired CSV schema.
         """
-        self._data['Filename'] = str(self.tcx_path) if self.tcx_path else ''
-        # Return a copy of the data excluding the memory-only 'Workout Name' key
-        return {k: v for k, v in self._data.items() if k != 'Workout Name'}
+        row_copy = self._data.copy()
+        row_copy['Filename'] = str(self.tcx_path) if self.tcx_path else ''
+
+        # Ensure we return only original columns, excluding our memory-only 'Workout Name'
+        return {k: v for k, v in row_copy.items() if k != 'Workout Name'}
 
     def __repr__(self) -> str:
         return f"<Workout ID={self.workout_id} Name='{self.workout_name}'>"
