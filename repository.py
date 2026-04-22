@@ -4,11 +4,15 @@ import configparser
 import csv
 import shutil
 import re
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Any
 
 from workout import Workout
+
+# Initialize logger to match the pattern in main.py and workout.py
+log = logging.getLogger(__name__)
 
 
 def _extract_metadata_from_filename(path: Path) -> Dict[str, Any]:
@@ -35,6 +39,7 @@ def _extract_metadata_from_filename(path: Path) -> Dict[str, Any]:
 
 
 def _get_unique_filepath(directory: Path, filename: str) -> Path:
+    """Ensures a unique filename by appending a numeric suffix if necessary."""
     filepath = directory / filename
     if not filepath.exists():
         return filepath
@@ -48,6 +53,10 @@ def _get_unique_filepath(directory: Path, filename: str) -> Path:
 
 
 class WorkoutRepository:
+    """
+    Handles persistence and retrieval of workout data and associated files.
+    """
+
     def __init__(self, config: configparser.ConfigParser):
         self.source_folder = Path(config.get('paths', 'source_gps_track_folder'))
         self.master_csv_path = Path(config.get('paths', 'tcx_file_list'))
@@ -56,8 +65,10 @@ class WorkoutRepository:
         self.workouts: Dict[str, Workout] = {}
 
     def load(self):
-        print(f"\n--- Loading Master Workout List from '{self.master_csv_path.name}' ---")
+        """Loads workout records from the master CSV file."""
+        log.info(f"--- Loading Master Workout List from '{self.master_csv_path.name}' ---")
         if not self.master_csv_path.exists():
+            log.warning(f"  - Master CSV not found at {self.master_csv_path}")
             return
         with open(self.master_csv_path, 'r', newline='', encoding='utf-8-sig') as f:
             reader = csv.DictReader(f)
@@ -65,21 +76,27 @@ class WorkoutRepository:
                 workout = Workout(row)
                 if workout.workout_id:
                     self.workouts[workout.workout_id] = workout
-        print(f"Loaded {len(self.workouts)} existing workouts from the master list.")
+        log.info(f"Loaded {len(self.workouts)} existing workouts from the master list.")
 
     def get_all(self) -> List[Workout]:
+        """Returns all workouts in the repository."""
         return list(self.workouts.values())
 
     def get_by_id(self, workout_id: str) -> Optional[Workout]:
+        """Retrieves a specific workout by its numeric ID."""
         return self.workouts.get(workout_id)
 
     def add_or_update(self, workout: Workout):
+        """Adds a new workout or updates an existing one in memory."""
         self.workouts[workout.workout_id] = workout
 
     def save_all(self):
-        print(f"\n--- Saving all {len(self.workouts)} workouts to '{self.master_csv_path.name}' ---")
+        """Persists all workouts in memory back to the master CSV."""
+        log.info(f"--- Saving all {len(self.workouts)} workouts to '{self.master_csv_path.name}' ---")
         if not self.workouts:
+            log.warning("  - No workouts to save.")
             return
+
         sorted_workouts = sorted(self.get_all(), key=lambda w: w.workout_date or datetime.min, reverse=True)
         all_rows = [w.to_csv_row() for w in sorted_workouts]
 
@@ -87,6 +104,7 @@ class WorkoutRepository:
         for row in all_rows:
             all_keys.update(row.keys())
 
+        # Define column order to keep the CSV readable and consistent
         preferred_order = ['Date Submitted', 'Workout Date', 'Activity Type', 'Link', 'Filename', 'Fingerprint',
                            'Notes', 'Distance (km)', 'Workout Time (seconds)']
         fieldnames = sorted(list(all_keys),
@@ -96,14 +114,14 @@ class WorkoutRepository:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(all_rows)
-        print(f"✅ Successfully wrote {len(all_rows)} records to '{self.master_csv_path.name}'.")
+        log.info(f"✅ Successfully wrote {len(all_rows)} records to '{self.master_csv_path.name}'.")
 
     def scan_and_build_id_map(self) -> Dict[str, Dict[str, Any]]:
         """
-        Scans for TCX files and cleans up duplicates.
+        Scans for TCX files and cleans up duplicates based on ID.
         Returns a map of ID -> {path: Path, title: str}
         """
-        print(f"\n--- Scanning folder and recovering titles from '{self.source_folder.name}' ---")
+        log.info(f"--- Scanning folder and recovering titles from '{self.source_folder.name}' ---")
         id_to_files: Dict[str, List[Path]] = {}
         for tcx_path in self.source_folder.glob("*.tcx"):
             meta = _extract_metadata_from_filename(tcx_path)
@@ -115,30 +133,29 @@ class WorkoutRepository:
             file_list.sort()
             file_to_keep = file_list[0]
             if len(file_list) > 1:
+                log.info(f"  - Cleaning {len(file_list) - 1} duplicates for ID {workout_id}")
                 for file_to_delete in file_list[1:]:
                     try:
                         file_to_delete.unlink()
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        log.error(f"    - Failed to delete duplicate {file_to_delete.name}: {e}")
 
-            # Extract final metadata for the kept file
             meta = _extract_metadata_from_filename(file_to_keep)
             authoritative_map[workout_id] = {'path': file_to_keep, 'title': meta['title']}
 
         return authoritative_map
 
-
     def save_tcx_file(self, temp_path: Path, workout: Workout, ignore_if_exists: bool = False) -> Optional[Path]:
         """
-            Moves/Renames a TCX file to the repository using standardized naming.
+        Moves/Renames a TCX file to the repository using standardized naming.
 
-            Args:
-                temp_path: The current location of the file.
-                workout: The workout object used to generate the new name.
-                ignore_if_exists: If True, returns the path immediately if the file is
-                                  already at the destination with the correct name.
-                                  Defaults to False to preserve original behavior.
-            """
+        Args:
+            temp_path: The current location of the file.
+            workout: The workout object used to generate the new name.
+            ignore_if_exists: If True, returns the path immediately if the file is
+                              already at the destination with the correct name.
+                              Defaults to False to preserve original behavior.
+        """
         new_filename_stem = workout.generate_filename_stem()
         new_filename = f"{new_filename_stem}.tcx"
         target_path = self.source_folder / new_filename
@@ -154,8 +171,8 @@ class WorkoutRepository:
         final_tcx_path = _get_unique_filepath(self.source_folder, new_filename)
         try:
             shutil.move(temp_path, final_tcx_path)
-            print(f"  - 💾 SAVED: Renamed and moved to '{final_tcx_path.name}'")
+            log.info(f"  - 💾 SAVED: Renamed and moved to '{final_tcx_path.name}'")
             return final_tcx_path
         except (OSError, shutil.Error) as e:
-            print(f"  - ❌ FAILED: Could not move file: {e}")
+            log.error(f"  - ❌ FAILED: Could not move file: {e}")
             return None
