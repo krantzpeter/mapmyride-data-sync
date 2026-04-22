@@ -20,17 +20,23 @@ def _extract_metadata_from_filename(path: Path) -> Dict[str, Any]:
     Parses a descriptive filename to extract ID and Title.
     Pattern: YYYY MM DD [Title] [Distance]km [Activity] (W[ID]).tcx
     """
-    metadata = {'id': None, 'title': None}
+    metadata = {'id': None, 'title': None, 'is_standard': False}
 
     # 1. Extract Workout ID from the (W[ID]) suffix
     id_match = re.search(r'\(W(\d+)\)', path.name)
     if not id_match:
         return metadata
-    metadata['id'] = id_match.group(1)
 
-    # 2. Extract Title (The text between the date and the distance/activity)
-    # Regex looks for text after the YYYY MM DD prefix and before the numeric distance
+    metadata['id'] = id_match.group(1)
     stem = path.stem
+
+    # 2. Standard Format Check
+    # Matches: Date (YYYY MM DD) followed by any text and ending with the (WID) suffix
+    if re.match(r'^\d{4} \d{2} \d{2}.*?\(W\d+\)$', stem):
+        metadata['is_standard'] = True
+
+    # 3. Title Extraction
+    # Looks specifically for text between the Date prefix and the Distance metadata
     title_match = re.search(r'^\d{4} \d{2} \d{2}\s+(.*?)\s+\d+\.\d+km', stem)
     if title_match:
         metadata['title'] = title_match.group(1).strip()
