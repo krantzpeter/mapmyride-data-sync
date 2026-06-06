@@ -15,6 +15,7 @@ project_path =
 [debugging]
 # The local path to the backup of the downloaded workout list from MapMyRide.
 # This should be inside your project folder.
+use_local_csv = False
 local_csv_path = mapmyride_export.csv
 
 [selectors]
@@ -28,3 +29,11 @@ password_input_id = password
 login_url = https://www.mapmyride.com/auth/login
 csv_export_url = https://www.mapmyride.com/workouts/export
 tcx_export_url_template = https://www.mapmyride.com/workout/{workout_id}/export_tcx
+
+[settings]
+write_all = False
+
+[selenium]
+chrome_path = C:\Program Files\Google\Chrome\Application\chrome.exe
+user_data_dir = C:\Users\krant\PycharmProjects\SelMapExtract\ChromeProfile
+remote_debugging_port = 9222
