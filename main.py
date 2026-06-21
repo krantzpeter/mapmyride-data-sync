@@ -13,7 +13,30 @@ from repository import WorkoutRepository
 from workout import Workout
 from map_generator import MapGenerator
 
+# Module level logger
 log = logging.getLogger(__name__)
+
+
+class GUIHandler(logging.Handler):
+    """
+    Custom logging handler to mirror log messages into a PySimpleGUI Multiline element.
+    Provides immediate GUI refresh to show progress in real-time.
+    """
+
+    def __init__(self, window: sg.Window, key: str):
+        super().__init__()
+        self.window = window
+        self.key = key
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            # Use the window's thread-safe print method
+            self.window[self.key].print(msg)
+            # Force the GUI to update immediately so the user sees progress
+            self.window.refresh()
+        except Exception:
+            self.handleError(record)
 
 
 def _process_and_merge_workouts(online_data: List[Dict],
@@ -56,7 +79,6 @@ def _process_and_merge_workouts(online_data: List[Dict],
 
             repo.add_or_update(new_workout)
         else:
-            # Type guard: existing_workout is confirmed to be a Workout object
             if full_check:
                 existing_workout.update_from_online_data(row)
                 file_status = existing_files_map.get(w_id, {})
@@ -231,7 +253,7 @@ def generate_maps(config: configparser.ConfigParser):
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', stream=sys.stdout)
+    # 1. Configuration
     app_config = configparser.ConfigParser()
     config_path = 'config.ini'
     if not Path(config_path).exists():
@@ -239,6 +261,7 @@ def main():
         return
     app_config.read(config_path)
 
+    # 2. GUI Setup
     sg.ChangeLookAndFeel('SystemDefault')
     action_buttons = ['-QUICK-', '-FULL-', '-LOCAL-', '-MAPS-']
     layout = [
@@ -247,11 +270,33 @@ def main():
         [sg.Button('Full Sync', key='-FULL-', size=(20, 2))],
         [sg.Button('Sync from Local CSV', key='-LOCAL-', size=(20, 2))],
         [sg.Button('Generate Maps', key='-MAPS-', size=(20, 2))],
-        [sg.Output(size=(80, 20), key='-OUTPUT-')],
+        # Removed reroute_stdout/stderr to prevent conflict with console logging
+        [sg.Multiline(size=(80, 20), key='-OUTPUT-', autoscroll=True)],
         [sg.Button('Exit', size=(10, 1))]
     ]
 
-    window = sg.Window('MapMyRide Control Panel', layout)
+    window = sg.Window('MapMyRide Control Panel', layout, finalize=True)
+
+    # 3. Robust Logging Configuration
+    # We add two handlers: one for the terminal and one for the GUI Multiline element
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # Clear existing handlers to prevent duplicate messages if main is re-entered
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
+
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    # Console Handler (Explicitly use sys.stdout)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # GUI Handler
+    gui_handler = GUIHandler(window, '-OUTPUT-')
+    gui_handler.setFormatter(formatter)
+    root_logger.addHandler(gui_handler)
 
     def toggle_buttons(disabled: bool):
         for key in action_buttons:
@@ -259,6 +304,7 @@ def main():
             if btn:
                 btn.update(disabled=disabled)
 
+    # 4. Event Loop
     while True:
         event, values = window.read()
         if event == sg.WIN_CLOSED or event == 'Exit':
@@ -267,9 +313,10 @@ def main():
         if event in action_buttons:
             toggle_buttons(disabled=True)
             window.refresh()
-            out_el = window['-OUTPUT-']
-            if out_el:
-                out_el.update('')
+
+            output_el = window['-OUTPUT-']
+            if output_el:
+                output_el.update('')
 
             try:
                 if event == '-QUICK-':

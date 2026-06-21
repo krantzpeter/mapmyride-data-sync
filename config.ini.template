@@ -6,29 +6,34 @@ tcx_archive_path =
 
 # The folder where simplified GeoJSON files for the map will be stored.
 # Example: C:/Users/YourUser/Documents/MyWorkouts/GeoJSON
-simplified_gps_track_folder =
+simplified_gps_track_folder = C:\Users\krant\GPSTrackData\Simplified
 
 # The root folder of your project. This is used for saving the final map.
 # Example: C:/Users/YourUser/PycharmProjects/SelMapExtract
-project_path =
+project_path = C:\Users\krant\PycharmProjects\SelMapExtract
+
+# Other paths
+source_gps_track_folder = C:\Users\krant\GPSTrackData
+tcx_file_list = C:\Users\krant\PycharmProjects\SelMapExtract\pk_workouts.csv
+download_log_file = C:\Users\krant\PycharmProjects\SelMapExtract\download_log.csv
 
 [debugging]
 # The local path to the backup of the downloaded workout list from MapMyRide.
 # This should be inside your project folder.
 use_local_csv = False
-local_csv_path = mapmyride_export.csv
+local_csv_path = C:\Users\krant\PycharmProjects\SelMapExtract\mapmyride_export.csv
 
 [selectors]
 # These are the HTML element IDs used by Selenium to find the login fields.
 # They are unlikely to change but are configurable just in case.
-email_input_id = email
-password_input_id = password
+password_input_id = password-input
+email_input_id = email-input
 
 [urls]
 # The URLs used by the client.
-login_url = https://www.mapmyride.com/auth/login
-csv_export_url = https://www.mapmyride.com/workouts/export
-tcx_export_url_template = https://www.mapmyride.com/workout/{workout_id}/export_tcx
+login_url = https://www.mapmyride.com/auth/login/?next=%%2F
+csv_export_url = https://www.mapmyride.com/workout/export/csv
+tcx_export_url_template = https://www.mapmyride.com/workout/export/{workout_id}/tcx
 
 [settings]
 write_all = False
