@@ -19,11 +19,15 @@ def _extract_metadata_from_filename(path: Path) -> Dict[str, Any]:
     Parses a filename to extract ID, Title, and check format compliance.
     Pattern: YYYY MM DD [Title] [Distance]km [Activity] (W[ID]).tcx
     """
-    metadata = {'id': None, 'title': None, 'is_standard': False}
+    # Fix: Explicitly type the dictionary as Dict[str, Any].
+    # This prevents the IDE from incorrectly inferring that values must be Booleans.
+    metadata: Dict[str, Any] = {'id': None, 'title': None, 'is_standard': False}
+
     id_match = re.search(r'\(W(\d+)\)', path.name)
     if not id_match:
         return metadata
 
+    # The assignment of a string here will now be accepted by the linter
     metadata['id'] = id_match.group(1)
     stem = path.stem
 
@@ -32,7 +36,7 @@ def _extract_metadata_from_filename(path: Path) -> Dict[str, Any]:
         metadata['is_standard'] = True
 
     # 2. Extract Title (text between Date and Distance)
-    # This regex is now more resilient to having zero or more spaces
+    # This regex is resilient to varying amounts of whitespace
     title_match = re.search(r'^\d{4} \d{2} \d{2}\s*(.*?)\s*\d+\.\d+km', stem)
     if title_match:
         found_title = title_match.group(1).strip()

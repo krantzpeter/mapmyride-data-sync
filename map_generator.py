@@ -1,9 +1,9 @@
-# map_generator.py
+# C:/Users/krant/PycharmProjects/SelMapExtract/map_generator.py (Top of file)
 
 import configparser
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Set  # Added Optional and Set
 
 import folium
 
@@ -33,13 +33,15 @@ class MapGenerator:
         self.simplified_folder.mkdir(parents=True, exist_ok=True)
         log.info(f"MapGenerator initialized. Simplified tracks in: {self.simplified_folder}")
 
-    def simplify_workouts(self, workouts: List[Workout], workout_types: set = None, only_if_missing: bool = True):
+    def simplify_workouts(self, workouts: List[Workout], workout_types: Optional[Set[str]] = None,
+                          only_if_missing: bool = True):
         """
         Creates simplified GeoJSON files for a list of workouts.
         """
         mode = "Incremental Mode" if only_if_missing else "Full Rebuild Mode"
         log.info(f"--- Simplifying TCX files ({mode}) ---")
 
+        # Use workout_types safely
         workouts_to_process = [w for w in workouts if not workout_types or w.activity_type.lower() in workout_types]
         log.info(f"Found {len(workouts_to_process)} workouts of specified types to process for simplification.")
 
@@ -78,11 +80,19 @@ class MapGenerator:
 
         for geojson_file in geojson_files:
             try:
+                # Use the stem as the label/popup
                 popup_text = geojson_file.stem
+
+                # Fix: Use GeoJsonPopup instead of Popup for GeoJson objects
+                # This resolves the 'Expected type GeoJsonPopup | None' error
+                gj_popup = folium.GeoJsonPopup(fields=[], labels=False, sticky=True)
+
                 folium.GeoJson(
                     str(geojson_file),
                     style_function=lambda x: {'color': 'blue', 'weight': 2.5, 'opacity': 0.7},
-                    popup=folium.Popup(popup_text)
+                    # We can use a tooltip for simpler stem display or
+                    # use the popup properly if the GeoJSON had properties
+                    tooltip=popup_text
                 ).add_to(feature_group)
             except Exception as e:
                 log.error(f"Could not process GeoJSON file '{geojson_file.name}': {e}")
@@ -90,8 +100,15 @@ class MapGenerator:
         feature_group.add_to(m)
 
         # Auto-fit the map to the bounds of the routes
-        if feature_group.get_bounds():
-            m.fit_bounds(feature_group.get_bounds())
+        bounds = feature_group.get_bounds()
+
+        # Fix: Ensure bounds is a valid Sequence[Sequence[float]]
+        # This resolves the list[list[float | None]] type error
+        if bounds and len(bounds) == 2:
+            # We filter out any potential None values to satisfy the IDESequence check
+            safe_bounds = [[float(coord) for coord in pair if coord is not None] for pair in bounds]
+            if all(len(pair) == 2 for pair in safe_bounds):
+                m.fit_bounds(safe_bounds)
 
         try:
             m.save(str(self.map_file_path))

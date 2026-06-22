@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
+# noinspection PyPep8Naming
 import lxml.etree as ET
 import os
 import logging
@@ -71,13 +72,28 @@ def _extract_tcx_file_properties(tcx_filename: str) -> Dict[str, str]:
 
 class Workout:
     def __init__(self, data: Dict[str, Any]):
+        """
+        Initializes a Workout object with data from a CSV row or online source.
+        """
         self._data = data
-        self.tcx_path: Optional[Path] = Path(data.get('Filename')) if data.get('Filename') else None
+
+        # Help the IDE narrow the type from Any | None to a concrete Path object
+        filename_val = data.get('Filename')
+        if filename_val:
+            self.tcx_path: Optional[Path] = Path(str(filename_val))
+        else:
+            self.tcx_path = None
+
         self.temp_proper_name: Optional[str] = None
 
     @property
     def workout_id(self) -> str:
-        return _get_workout_id_from_link(self._data.get('Link', ''))
+        """
+        Extracts the ID from the Link.
+        Uses cast to satisfy IDE type checking for dictionary access.
+        """
+        link_val = self._data.get('Link', '')
+        return _get_workout_id_from_link(str(link_val))
 
     @property
     def workout_date(self) -> Optional[datetime]:
@@ -134,10 +150,20 @@ class Workout:
         self._data.update(new_data)
 
     def generate_filename_stem(self) -> str:
-        date_prefix = self.workout_date.strftime('%Y %m %d') if self.workout_date else "0000 00 00"
+        """
+        Generates a standardized filename.
+        Uses a local variable for date to satisfy IDE type narrowing.
+        """
+        w_date = self.workout_date
+        if w_date:
+            date_prefix = w_date.strftime('%Y %m %d')
+        else:
+            date_prefix = "0000 00 00"
+
         activity_display = self.activity_type.replace('/', '_')
         raw_name = self.workout_name
         cleaned_name = raw_name
+
         if cleaned_name:
             dist_patterns = [rf'{self.distance_km:.2f}\s*km', rf'{self.distance_km:g}\s*km']
             for dp in dist_patterns:

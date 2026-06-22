@@ -5,6 +5,7 @@ import csv
 import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Any
+# noinspection PyPep8Naming
 import PySimpleGUI as sg
 import sys
 
@@ -28,14 +29,23 @@ class GUIHandler(logging.Handler):
         self.window = window
         self.key = key
 
-    def emit(self, record):
+    def emit(self, record: logging.LogRecord):
         try:
             msg = self.format(record)
-            # Use the window's thread-safe print method
-            self.window[self.key].print(msg)
-            # Force the GUI to update immediately so the user sees progress
-            self.window.refresh()
+            element = self.window[self.key]
+
+            # Type guard: verify the element exists and is a Multiline element
+            # This resolves the 'Member Element does not have attribute print' error
+            if isinstance(element, sg.Multiline):
+                element.print(msg)
+                # Force the GUI to update immediately so the user sees progress
+                self.window.refresh()
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        # noinspection PyBroadException
         except Exception:
+            # Standard way for handlers to handle their own internal failures
+            # we catch everything here to prevent logging errors from crashing the app
             self.handleError(record)
 
 
@@ -270,7 +280,6 @@ def main():
         [sg.Button('Full Sync', key='-FULL-', size=(20, 2))],
         [sg.Button('Sync from Local CSV', key='-LOCAL-', size=(20, 2))],
         [sg.Button('Generate Maps', key='-MAPS-', size=(20, 2))],
-        # Removed reroute_stdout/stderr to prevent conflict with console logging
         [sg.Multiline(size=(80, 20), key='-OUTPUT-', autoscroll=True)],
         [sg.Button('Exit', size=(10, 1))]
     ]
@@ -278,17 +287,15 @@ def main():
     window = sg.Window('MapMyRide Control Panel', layout, finalize=True)
 
     # 3. Robust Logging Configuration
-    # We add two handlers: one for the terminal and one for the GUI Multiline element
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
 
-    # Clear existing handlers to prevent duplicate messages if main is re-entered
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
 
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
-    # Console Handler (Explicitly use sys.stdout)
+    # Console Handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
@@ -315,7 +322,7 @@ def main():
             window.refresh()
 
             output_el = window['-OUTPUT-']
-            if output_el:
+            if isinstance(output_el, sg.Multiline):
                 output_el.update('')
 
             try:
@@ -330,8 +337,10 @@ def main():
                     simplify_only(config=app_config)
                 elif event == '-MAPS-':
                     generate_maps(config=app_config)
+            # noinspection PyBroadException
             except Exception as e:
-                log.error(f"An unhandled exception occurred: {e}", exc_info=True)
+                # Catching general Exception here is acceptable to keep the GUI alive
+                log.error(f"An unhandled error occurred: {e}", exc_info=True)
             finally:
                 toggle_buttons(disabled=False)
 

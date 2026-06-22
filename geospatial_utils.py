@@ -1,10 +1,11 @@
-# geospatial_utils.py
+# C:/Users/krant/PycharmProjects/SelMapExtract/geospatial_utils.py
 
 import logging
 from pathlib import Path
 from typing import List, Tuple
 
 import geopandas as gpd
+# noinspection PyPep8Naming
 import lxml.etree as ET
 from shapely.geometry import LineString
 
@@ -34,13 +35,14 @@ def parse_tcx_for_coords(tcx_file: str) -> List[Tuple[float, float]]:
     try:
         trackpoints = root.findall('.//default:Trackpoint', namespaces=ns)
         if not trackpoints:
-            trackpoints = root.findall('.//Trackpoint') # Fallback
+            trackpoints = root.findall('.//Trackpoint')  # Fallback
     except Exception as e:
         log.error(f"Failed during findall operation for trackpoints. Reason: {e}")
         return []
 
     if not trackpoints:
-        log.warning(f"No <Trackpoint> elements found in {Path(tcx_file).name}. The file may be empty or structured unexpectedly.")
+        log.warning(f"No <Trackpoint> elements found in {Path(tcx_file).name}. "
+                    f"The file may be empty or structured unexpectedly.")
         return []
 
     # --- Extract Coordinates ---
@@ -48,14 +50,16 @@ def parse_tcx_for_coords(tcx_file: str) -> List[Tuple[float, float]]:
     for i, trackpoint in enumerate(trackpoints):
         position = trackpoint.find('default:Position', namespaces=ns)
         if position is None:
-            position = trackpoint.find('Position') # Fallback
+            position = trackpoint.find('Position')  # Fallback
 
         if position is not None:
             lat_el = position.find('default:LatitudeDegrees', namespaces=ns)
-            if lat_el is None: lat_el = position.find('LatitudeDegrees') # Fallback
+            if lat_el is None:
+                lat_el = position.find('LatitudeDegrees')  # Fallback
 
             lon_el = position.find('default:LongitudeDegrees', namespaces=ns)
-            if lon_el is None: lon_el = position.find('LongitudeDegrees') # Fallback
+            if lon_el is None:
+                lon_el = position.find('LongitudeDegrees')  # Fallback
 
             if lat_el is not None and lon_el is not None and lat_el.text is not None and lon_el.text is not None:
                 try:
@@ -88,18 +92,38 @@ def create_simplified_geojson(
 
         # Simplify geometry
         utm_crs = gdf.estimate_utm_crs(datum_name="WGS 84")
-        gdf_projected = gdf.to_crs(utm_crs)
-        gdf_projected['geometry'] = gdf_projected.geometry.simplify(
-            tolerance=tolerance, preserve_topology=True
-        )
-        gdf_simplified = gdf_projected.to_crs(gdf.crs)
 
-        if gdf_simplified.empty or gdf_simplified.geometry.is_empty.all():
-            log.warning(f"Geometry for {tcx_path.name} became empty after simplification (tolerance={tolerance}).")
+        # Type Guard: Ensure utm_crs is not None before projecting
+        if utm_crs is None:
+            log.error(f"Could not estimate suitable UTM projection for {tcx_path.name}. Skipping simplification.")
             return
 
-        gdf_simplified.to_file(str(geojson_path), driver='GeoJSON')
-        log.info(f"Simplified '{tcx_path.name}' -> '{geojson_path.name}'")
+        # Fix: Convert the CRS object to WKT string to satisfy strict IDE type checking
+        # This resolves the 'got CRS | None instead' error at the projection call
+        utm_wkt = utm_crs.to_wkt()
+        gdf_projected = gdf.to_crs(utm_wkt)
+
+        # Explicit check to satisfy IDE type checker regarding GeoDataFrame status
+        if gdf_projected is not None and not gdf_projected.empty:
+            gdf_projected['geometry'] = gdf_projected.geometry.simplify(
+                tolerance=tolerance, preserve_topology=True
+            )
+
+            # Reproject back to original CRS (WGS84)
+            # We know gdf.crs is not None here because we initialized it above
+            original_crs = gdf.crs
+            if original_crs is not None:
+                gdf_simplified = gdf_projected.to_crs(original_crs)
+
+                # Type Guard: verify gdf_simplified exists and has data
+                if gdf_simplified is not None and not gdf_simplified.empty:
+                    if not gdf_simplified.geometry.is_empty.all():
+                        gdf_simplified.to_file(str(geojson_path), driver='GeoJSON')
+                        log.info(f"Simplified '{tcx_path.name}' -> '{geojson_path.name}'")
+                    else:
+                        log.warning(f"Geometry for {tcx_path.name} became empty after simplification.")
+                else:
+                    log.warning(f"Simplification resulted in an empty dataset for {tcx_path.name}.")
 
     except Exception as e:
         log.error(f"ERROR simplifying '{tcx_path.name}': {e}", exc_info=True)
