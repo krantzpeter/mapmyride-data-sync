@@ -7,7 +7,6 @@ from pathlib import Path
 from client import MapMyRideClient
 from repository import WorkoutRepository
 from map_generator import MapGenerator
-from workout import Workout
 
 # Setup local logging for the test
 logging.basicConfig(
@@ -50,6 +49,7 @@ def run_system_check():
     client = MapMyRideClient(config)
     try:
         log.info("Checking browser connection (Remote Debugging)...")
+        # noinspection PyProtectedMember
         if client._ensure_login_and_browser():
             log.info("✅ Step 3: Successfully attached to Chrome and bypassed security.")
         else:
