@@ -3,6 +3,7 @@
 import configparser
 import csv
 import logging
+import time
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 # noinspection PyPep8Naming
@@ -35,7 +36,6 @@ class GUIHandler(logging.Handler):
             element = self.window[self.key]
 
             # Type guard: verify the element exists and is a Multiline element
-            # This resolves the 'Member Element does not have attribute print' error
             if isinstance(element, sg.Multiline):
                 element.print(msg)
                 # Force the GUI to update immediately so the user sees progress
@@ -44,9 +44,70 @@ class GUIHandler(logging.Handler):
             raise
         # noinspection PyBroadException
         except Exception:
-            # Standard way for handlers to handle their own internal failures
-            # we catch everything here to prevent logging errors from crashing the app
+            # Prevent logging errors from crashing the background synchronization
             self.handleError(record)
+
+
+def _handle_new_workout(row: Dict, repo: WorkoutRepository, client: Optional[MapMyRideClient]):
+    """Helper to process a workout not found in the local repository."""
+    w_id = Workout(row).workout_id
+    log.info(f"  - NEW: Workout ID {w_id} ({row.get('Activity Type')})")
+    new_workout = Workout(row)
+
+    is_hike_or_walk = any(t in new_workout.activity_type.lower() for t in ['hike', 'walk'])
+
+    if client and is_hike_or_walk:
+        name = client.fetch_workout_name(w_id)
+        if name:
+            new_workout.temp_proper_name = name
+            log.info(f"    - Title recovered: {name}")
+
+    if client:
+        temp_path = client.download_tcx_file(w_id)
+        if temp_path:
+            new_workout.tcx_path = repo.save_tcx_file(temp_path, new_workout)
+
+    repo.add_or_update(new_workout)
+
+
+def _handle_existing_workout(existing_workout: Workout, row: Dict, repo: WorkoutRepository,
+                             existing_files_map: Dict, client: Optional[MapMyRideClient]) -> bool:
+    """Helper to refresh and repair data for a workout already in the repository."""
+    w_id = existing_workout.workout_id
+    existing_workout.update_from_online_data(row)
+
+    file_status = existing_files_map.get(w_id, {})
+
+    if file_status:
+        existing_workout.tcx_path = file_status.get('path')
+        if file_status.get('title') and not existing_workout.workout_name:
+            existing_workout.temp_proper_name = file_status['title']
+
+    is_managed = file_status.get('is_standard', False)
+    current_path = existing_workout.tcx_path
+    file_missing = current_path is None or not current_path.exists()
+    is_hike_or_walk = any(t in existing_workout.activity_type.lower() for t in ['hike', 'walk'])
+
+    repaired = False
+    # 1. Scraping Repair (Hike/Walk only)
+    if is_hike_or_walk and not existing_workout.workout_name and not is_managed and client:
+        scrape_name = client.fetch_workout_name(w_id)
+        if scrape_name:
+            existing_workout.temp_proper_name = scrape_name
+            log.info(f"    - 🛠 REPAIRED: Name recovered: {scrape_name}")
+            if not file_missing and current_path is not None:
+                existing_workout.tcx_path = repo.save_tcx_file(current_path, existing_workout, ignore_if_exists=True)
+            repaired = True
+
+    # 2. Missing File Repair
+    if file_missing and client:
+        log.info(f"    - 🛠 RE-DOWNLOADING: File missing for ID {w_id}")
+        re_download_path = client.download_tcx_file(w_id)
+        if re_download_path:
+            existing_workout.tcx_path = repo.save_tcx_file(re_download_path, existing_workout)
+
+    repo.add_or_update(existing_workout)
+    return repaired
 
 
 def _process_and_merge_workouts(online_data: List[Dict],
@@ -54,74 +115,26 @@ def _process_and_merge_workouts(online_data: List[Dict],
                                 existing_files_map: Dict[str, Dict[str, Any]],
                                 client: Optional[MapMyRideClient] = None,
                                 full_check: bool = True):
+    """Main processing loop for merging online data with local repository."""
     log.info("--- Processing and Merging Workouts ---")
-    new_workouts_count = 0
-    repaired_names_count = 0
+    new_count = 0
+    repair_count = 0
 
-    for i, row in enumerate(online_data):
+    for row in online_data:
         temp_workout = Workout(row)
-        w_id = temp_workout.workout_id
-        if not w_id:
+        if not temp_workout.workout_id or temp_workout.is_empty:
             continue
 
-        if temp_workout.is_empty:
-            log.info(f"  - SKIPPING: Workout ID {w_id} is empty (0km/0s).")
-            continue
-
-        existing_workout = repo.get_by_id(w_id)
-        is_hike_or_walk = any(t in temp_workout.activity_type.lower() for t in ['hike', 'walk'])
+        existing_workout = repo.get_by_id(temp_workout.workout_id)
 
         if existing_workout is None:
-            new_workouts_count += 1
-            log.info(f"  - NEW: Workout ID {w_id} ({temp_workout.activity_type})")
-            new_workout = Workout(row)
+            _handle_new_workout(row, repo, client)
+            new_count += 1
+        elif full_check:
+            if _handle_existing_workout(existing_workout, row, repo, existing_files_map, client):
+                repair_count += 1
 
-            if client and is_hike_or_walk:
-                name = client.fetch_workout_name(w_id)
-                if name:
-                    new_workout.temp_proper_name = name
-                    log.info(f"    - Title recovered: {name}")
-
-            if client:
-                temp_path = client.download_tcx_file(w_id)
-                if temp_path:
-                    new_workout.tcx_path = repo.save_tcx_file(temp_path, new_workout)
-
-            repo.add_or_update(new_workout)
-        else:
-            if full_check:
-                existing_workout.update_from_online_data(row)
-                file_status = existing_files_map.get(w_id, {})
-
-                if file_status:
-                    existing_workout.tcx_path = file_status.get('path')
-                    if file_status.get('title') and not existing_workout.workout_name:
-                        existing_workout.temp_proper_name = file_status['title']
-
-                is_managed = file_status.get('is_standard', False)
-                current_path = existing_workout.tcx_path
-                file_missing = current_path is None or not current_path.exists()
-
-                if is_hike_or_walk and not existing_workout.workout_name and not is_managed and client:
-                    scrape_name = client.fetch_workout_name(w_id)
-                    if scrape_name:
-                        existing_workout.temp_proper_name = scrape_name
-                        repaired_names_count += 1
-                        log.info(f"    - 🛠 REPAIRED: Name recovered: {scrape_name}")
-                        if not file_missing and current_path is not None:
-                            existing_workout.tcx_path = repo.save_tcx_file(current_path,
-                                                                           existing_workout,
-                                                                           ignore_if_exists=True)
-
-                if file_missing and client:
-                    log.info(f"    - 🛠 RE-DOWNLOADING: File missing for ID {w_id}")
-                    re_download_path = client.download_tcx_file(w_id)
-                    if re_download_path:
-                        existing_workout.tcx_path = repo.save_tcx_file(re_download_path, existing_workout)
-
-                repo.add_or_update(existing_workout)
-
-    log.info(f"--- Sync Summary: {new_workouts_count} New, {repaired_names_count} Repaired ---")
+    log.info(f"--- Sync Summary: {new_count} New, {repair_count} Repaired ---")
 
 
 def repair_workout_names(config: configparser.ConfigParser,

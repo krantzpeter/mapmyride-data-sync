@@ -148,43 +148,45 @@ class MapMyRideClient:
     def _wait_for_manual_login(self) -> bool:
         """
         Checks if logged in; if not, waits for the user to log in manually.
-        Uses specific indicators to avoid false positives from Cloudflare background scripts.
+        Now includes a safety check to handle the browser being closed during the wait.
         """
         driver = self.browser
         if not driver:
             return False
 
-        # Use the main workouts page to check login status (instead of the CSV link)
         check_url = "https://www.mapmyride.com/workouts/"
-
         log.info("Checking login status...")
-        driver.get(check_url)
-        time.sleep(3)
+
+        try:
+            driver.get(check_url)
+            time.sleep(3)
+        except Exception as e:
+            log.error(f"Initial login check failed: {e}")
+            return False
 
         while True:
-            curr_url = driver.current_url
-            page_src = driver.page_source.lower()
-            page_title = driver.title.lower()
+            try:
+                curr_url = driver.current_url
+                page_title = driver.title.lower()
 
-            # More specific detection:
-            # 1. Are we on the login page?
-            # 2. Is the page title specifically the Cloudflare challenge title?
-            is_at_login = "auth/login" in curr_url
-            is_cf_challenge = "just a moment..." in page_title or "cloudflare" in page_title and "challenge" in curr_url
+                is_at_login = "auth/login" in curr_url
+                is_cf_challenge = "just a moment..." in page_title or \
+                                  ("cloudflare" in page_title and "challenge" in curr_url)
 
-            if is_at_login or is_cf_challenge:
-                log.warning("!!! BOT DETECTION OR LOGIN REQUIRED !!!")
-                log.warning(f"Status: {'Login Required' if is_at_login else 'Cloudflare Challenge Detected'}")
-                log.warning("Please solve the challenge or log in manually in the Chrome window.")
-                log.warning("The script will resume once you reach your dashboard.")
-                time.sleep(5)
-            else:
-                # If we are on mapmyride and NOT on a login/challenge page, we are in.
-                if "mapmyride.com" in curr_url:
-                    break
-                else:
-                    log.warning("Browser is at an unexpected location. Please navigate to MapMyRide.")
+                if is_at_login or is_cf_challenge:
+                    log.warning("!!! BOT DETECTION OR LOGIN REQUIRED !!!")
+                    log.warning("Please solve the challenge or log in manually in the Chrome window.")
                     time.sleep(5)
+                else:
+                    if "mapmyride.com" in curr_url:
+                        break
+                    else:
+                        log.warning("Browser is at an unexpected location. Please navigate to MapMyRide.")
+                        time.sleep(5)
+            except Exception as browser_err:
+                log.error("The Chrome window appears to have been closed or lost. Aborting check.")
+                log.debug(f"Technical Reason: {browser_err}")
+                return False
 
         log.info("Login/Verification cleared. Resuming automation...")
         return True
