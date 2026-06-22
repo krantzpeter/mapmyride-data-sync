@@ -12,6 +12,9 @@ env/
 # PyCharm specific
 .idea/
 
+# Chrome profile
+ChromeProfile/
+
 # Local config files - good practice to ignore
 config.ini
 
